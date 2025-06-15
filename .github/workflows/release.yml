@@ -24,12 +24,23 @@ jobs:
         
         if [ "$MAJOR_VERSION" -lt 6 ]; then
           echo "Swift 6+ required but found Swift $SWIFT_VERSION"
-          echo "Installing latest Swift toolchain..."
+          echo "Installing Swift 6 toolchain..."
           
-          # Download and install latest Swift toolchain
+          # Download Swift 6.0.2 toolchain
           SWIFT_URL="https://download.swift.org/swift-6.0.2-release/xcode/swift-6.0.2-RELEASE-osx.pkg"
-          curl -o swift.pkg "$SWIFT_URL"
-          sudo installer -pkg swift.pkg -target /
+          echo "Downloading from: $SWIFT_URL"
+          curl -L -o swift-toolchain.pkg "$SWIFT_URL"
+          
+          # Verify download
+          if [ ! -f swift-toolchain.pkg ]; then
+            echo "Download failed, trying alternative method..."
+            # Try development snapshot instead
+            SWIFT_DEV_URL="https://download.swift.org/development/xcode/swift-DEVELOPMENT-SNAPSHOT-2024-11-26-a-osx.pkg"
+            curl -L -o swift-toolchain.pkg "$SWIFT_DEV_URL"
+          fi
+          
+          # Install toolchain
+          sudo installer -pkg swift-toolchain.pkg -target /
           
           # Update PATH to use new Swift
           export PATH="/Library/Developer/Toolchains/swift-latest.xctoolchain/usr/bin:$PATH"
@@ -37,6 +48,9 @@ jobs:
           
           # Verify new installation
           swift --version
+          
+          # Clean up
+          rm swift-toolchain.pkg
         else
           echo "Swift $SWIFT_VERSION meets requirements (6+)"
         fi
