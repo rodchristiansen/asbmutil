@@ -73,15 +73,15 @@ The tool will read only the first column (serial numbers) and ignore any additio
 ```bash
 ./asbmutil list-devices | jq
 
-page 1: found 100 devices
-page 2: found 100 devices
-page 3: found 100 devices
-page 4: found 100 devices
-page 5: found 100 devices
-page 6: found 100 devices
-page 7: found 100 devices
-page 8: found 100 devices
-page 9: found 68 devices
+Page 1: found 100 devices
+Page 2: found 100 devices
+Page 3: found 100 devices
+Page 4: found 100 devices
+Page 5: found 100 devices
+Page 6: found 100 devices
+Page 7: found 100 devices
+Page 8: found 100 devices
+Page 9: found 68 devices
 [
   {
     "serialNumber": "F4K9X72HG3M5",
@@ -110,9 +110,7 @@ page 9: found 68 devices
 
 ```bash
 ./asbmutil list-mdm-servers | jq
-```
 
-```json
 [
   {
     "serverName": "Devices Added by Apple Configurator 2",
@@ -149,9 +147,7 @@ page 9: found 68 devices
 
 ```bash
 ./asbmutil get-assigned-mdm F4K9X72HG3M5 | jq
-```
 
-```json
 {
   "data": {
     "id": "C5E8B39F4A7D4E2C8931F6D4A2B8E5F7",
