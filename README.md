@@ -2,7 +2,7 @@
 
 Swift command‑line interface for [Apple School & Business Manager (AxM) API](https://developer.apple.com/documentation/apple-school-and-business-manager-api)
 
-List devices and assign/unassign MDM servers in bulk.
+Get devices info and assign/unassign MDM servers in bulk.
 
 ## Features
 
