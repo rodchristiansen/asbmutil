@@ -1,0 +1,45 @@
+# ── macOS housekeeping ───────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# ── Xcode build artefacts ────────────────────────────────────────────
+build/
+DerivedData/
+*.xcarchive
+*.xcresult
+*.ipa
+*.dSYM*
+*.xcuserstate
+*.xcscmblueprint
+*.moved-aside
+xcuserdata/
+
+# ── Swift Package Manager ────────────────────────────────────────────
+.build/
+.swiftpm/
+Packages/
+
+# ── CocoaPods / Carthage / Accio ─────────────────────────────────────
+Pods/
+*.xcworkspace
+Carthage/Build/
+Carthage/Checkouts/
+Dependencies/
+.accio/
+
+# ── Fastlane outputs ────────────────────────────────────────────────
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/
+fastlane/test_output/
+fastlane/*.env
+
+# ── Playgrounds & previews ──────────────────────────────────────────
+timeline.xctimeline
+playground.xcworkspace
+
+# ── Code injection & debugging helpers ──────────────────────────────
+iOSInjectionProject/
+*.memgraph
