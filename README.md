@@ -1,8 +1,8 @@
 # `asbmutil`
 
-Command‑line interface for [Apple School & Business Manager (AxM) API](https://developer.apple.com/documentation/apple-school-and-business-manager-api)
+Swift command‑line interface for [Apple School & Business Manager (AxM) API](https://developer.apple.com/documentation/apple-school-and-business-manager-api)
 
-List devices, assign/unassign serials, and poll activity jobs from macOS.
+List devices, manage MDM servers, assign/unassign devices.
 
 ## Features
 
