@@ -13,7 +13,19 @@ List devices, assign/unassign serials, and poll activity jobs from macOS.
 * CSV file support for bulk operations
 * StrictConcurrency enabled
 
-## Initial setup
+## Quick setup
+
+### Build
+
+```bash
+git clone https://github.com/rodchristiansen/asbmutil.git
+cd asbmutil
+swift build -c release
+```
+
+Binary: `.build/release/asbmutil`
+
+### Save your Credentials to Keychain
 
 ```bash
 cd .build/release/
@@ -155,16 +167,6 @@ Page 9: found 68 devices
   }
 }
 ```
-
-## Build
-
-```bash
-git clone https://github.com/rodchristiansen/asbmutil.git
-cd asbmutil
-swift build -c release
-```
-
-Binary: `.build/release/asbmutil`
 
 ## Requirements
 
