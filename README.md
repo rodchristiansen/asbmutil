@@ -8,6 +8,7 @@ Get devices info and assign/unassign MDM servers in bulk.
 
 * Pure Swift 6 binary, no external runtime dependencies
 * Secure and store credentials in macOS Keychain
+* Multiple profile support for managing different AxM instances
 * Automatic OAuth 2 client‑assertion handling
 * Paginated device fetch for large inventories
 * CSV file support for bulk operations
@@ -35,50 +36,151 @@ cd .build/release/
   --pem-path   ~/Downloads/axm_private_key.pem
 ```
 
+### Multiple Profile Support
+
+For organizations managing multiple ABM instances, you can create named profiles:
+
+```bash
+# Set up credentials for school district
+./asbmutil config set \
+  --profile "school-unit-2" \
+  --client-id  SCHOOLAPI.27f3a3b2-801f-4e0b-a23e-e526faaee089 \
+  --key-id     c12e9107-5d5e-421c-969c-7196b59bde98 \
+  --pem-path   ~/Downloads/school_private_key.pem
+
+# Set up credentials for business division
+./asbmutil config set \
+  --profile "business-unit-3" \
+  --client-id  BUSINESSAPI.84c7b9e1-402a-4f1c-b56d-f839e77abc12 \
+  --key-id     a89f6254-2c1e-481b-856c-4297f66cda87 \
+  --pem-path   ~/Downloads/business_private_key.pem
+
+# List all profiles
+./asbmutil config list-profiles
+
+# Switch current active profile
+./asbmutil config set-profile "business-unit-3"
+
+# Show current profile
+./asbmutil config show-profile
+```
+
 ## Commands
 
 ```bash
-# list every device serial
+# Profile Management
+./asbmutil config list-profiles              # List all credential profiles
+./asbmutil config set-profile "profile-name" # Set current active profile
+./asbmutil config show-profile               # Show current active profile
+
+# Device Operations (using current profile)
 ./asbmutil list-devices
-
-# list devices with custom page size
 ./asbmutil list-devices --limit 200
-
-# list devices with detailed pagination info
 ./asbmutil list-devices --show-pagination
 
-# list devices with both custom limit and pagination details
-./asbmutil list-devices --limit 300 --show-pagination
+# Device Operations (using specific profile)
+./asbmutil list-devices --profile "school-district"
+./asbmutil assign --serials P8R2K47NF5X9 --mdm "Intune" --profile "business-division"
 
-# list all device management services
+# MDM Server Operations
 ./asbmutil list-mdm-servers
-
-# show stored credentials (private key is masked)
-./asbmutil config show
-
-# clear stored credentials from keychain
-./asbmutil config clear
-
-# get assigned MDM server for a device
 ./asbmutil get-assigned-mdm P8R2K47NF5X9
 
-# assign two serials to an MDM server
+# Credential Management
+./asbmutil config show                           # Show current profile credentials
+./asbmutil config show --profile "profile-name"  # Show specific profile
+./asbmutil config clear                          # Clear all profiles
+./asbmutil config clear --profile "profile-name" # Clear specific profile
+
+# Assignment Operations
 ./asbmutil assign --serials P8R2K47NF5X9,Q7M5V83WH4L2 --mdm "Intune"
-
-# assign serials from CSV file to an MDM server
 ./asbmutil assign --csv-file devices.csv --mdm "Intune"
-
-# unassign two serials from an MDM server
 ./asbmutil unassign --serials P8R2K47NF5X9,Q7M5V83WH4L2 --mdm "MicroMDM"
-
-# unassign serials from CSV file from an MDM server
 ./asbmutil unassign --csv-file devices.csv --mdm "MicroMDM"
 
-# check activity progress
+# Activity Status
 ./asbmutil batch-status 361c8b76-55c6-4d07-9c1a-2ea9755c34e3
 ```
 
-`asbmutil --help` shows full usage.
+## Profile System
+
+The profile system allows you to manage credentials for multiple ABM instances:
+
+* **Default Profile**: If no profile is specified, uses the "default" profile
+* **Named Profiles**: Create profiles with descriptive names like "school-east", "business-corp", etc.
+* **Current Profile**: One profile is always "current" and used by default
+* **Per-Command Override**: Use `--profile` on any command to override the current profile
+
+### Profile Commands
+
+```bash
+# Create/update a profile
+./asbmutil config set --profile "my-school" --client-id ... --key-id ... --pem-path ...
+
+# List all profiles
+./asbmutil config list-profiles
+
+# Set current active profile  
+./asbmutil config set-profile "my-school"
+
+# Show current profile info
+./asbmutil config show-profile
+
+# Show specific profile credentials
+./asbmutil config show --profile "my-school"
+
+# Clear specific profile
+./asbmutil config clear --profile "my-school"
+
+# Clear all profiles
+./asbmutil config clear
+```
+
+### Sample Profile Output
+
+```bash
+./asbmutil config list-profiles
+
+Available profiles:
+  business-division - business.api - created Dec 15, 2024 at 2:30 PM
+  default - school.api - created Dec 10, 2024 at 10:15 AM
+  school-district (current) - school.api - created Dec 12, 2024 at 9:45 AM
+```
+
+### Scripting with Multiple Profiles
+
+For automation and scripts, you can use the `--profile` option to work with multiple ABM instances without switching the current profile:
+
+```bash
+#!/bin/bash
+
+# Script to manage multiple ABM instances
+SCHOOL_PROFILE="school-district"
+BUSINESS_PROFILE="business-corp"
+
+# List devices from school instance
+echo "School devices:"
+asbmutil list-devices --profile "$SCHOOL_PROFILE"
+
+# List devices from business instance  
+echo "Business devices:"
+asbmutil list-devices --profile "$BUSINESS_PROFILE"
+
+# Assign devices to different MDM servers per instance
+asbmutil assign --serials ABC123,DEF456 --mdm "School MDM" --profile "$SCHOOL_PROFILE"
+asbmutil assign --serials GHI789,JKL012 --mdm "Business MDM" --profile "$BUSINESS_PROFILE"
+
+# Check status on both instances
+asbmutil batch-status "$ACTIVITY_ID_1" --profile "$SCHOOL_PROFILE"
+asbmutil batch-status "$ACTIVITY_ID_2" --profile "$BUSINESS_PROFILE"
+```
+
+This approach is particularly useful for:
+
+* **CI/CD pipelines** managing multiple organizations
+* **Scheduled scripts** that need to operate across different ABM instances
+* **Administrative tools** that aggregate data from multiple sources
+* **Testing environments** where you need to validate against different ABM setups
 
 ## CSV File Format
 
