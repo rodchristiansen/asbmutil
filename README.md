@@ -35,7 +35,7 @@ cd .build/release/
   --pem-path   ~/Downloads/axm_private_key.pem
 ```
 
-## Common commands
+## Commands
 
 ```bash
 # list every device serial
@@ -44,17 +44,23 @@ cd .build/release/
 # list all device management services
 ./asbmutil list-mdm-servers
 
+# show stored credentials (private key is masked)
+./asbmutil config show
+
+# clear stored credentials from keychain
+./asbmutil config clear
+
 # get assigned MDM server for a device
-./asbmutil get-assigned-mdm F4K9X72HG3M5
+./asbmutil get-assigned-mdm P8R2K47NF5X9
 
 # assign two serials to an MDM server
-./asbmutil assign --serials F4K9X72HG3M5,XY789ABC123D --mdm "Intune"
+./asbmutil assign --serials P8R2K47NF5X9,Q7M5V83WH4L2 --mdm "Intune"
 
 # assign serials from CSV file to an MDM server
 ./asbmutil assign --csv-file devices.csv --mdm "Intune"
 
 # unassign two serials from an MDM server
-./asbmutil unassign --serials F4K9X72HG3M5,XY789ABC123D --mdm "MicroMDM"
+./asbmutil unassign --serials P8R2K47NF5X9,Q7M5V83WH4L2 --mdm "MicroMDM"
 
 # unassign serials from CSV file from an MDM server
 ./asbmutil unassign --csv-file devices.csv --mdm "MicroMDM"
@@ -70,15 +76,33 @@ cd .build/release/
 For bulk operations, you can use a CSV file where the first column contains device serial numbers:
 
 ```csv
-F4K9X72HG3M5,MacBook Air,2023
-QWER234ASDF8,MacBook Pro,2022
-MN8L5V92HKJP,iMac,2024
-C02TY67HGFR4,Mac Studio,2023
+P8R2K47NF5X9,MacBook Air,2023
+Q7M5V83WH4L2,MacBook Pro,2022
+T3N6Y94KM8P1,iMac,2024
+Z9B4C72HXFW5,Mac Studio,2023
 ```
 
 The tool will read only the first column (serial numbers) and ignore any additional columns.
 
 ## Sample Output
+
+### Config Show
+
+```bash
+./asbmutil config show
+
+SBM_CLIENT_ID=SCHOOLAPI.27f3a3b2-801f-4e0b-a23e-e526faaee089
+SBM_KEY_ID=c12e9107-5d5e-421c-969c-7196b59bde98
+PRIVATE_KEY=[-----BEGIN PRIVATE KEY-----…]
+```
+
+### Config Clear
+
+```bash
+./asbmutil config clear
+
+credentials cleared
+```
 
 ### List Devices
 
@@ -96,23 +120,23 @@ Page 8: found 100 devices
 Page 9: found 68 devices
 [
   {
-    "serialNumber": "F4K9X72HG3M5",
+    "serialNumber": "P8R2K47NF5X9",
     "partNumber": "Z0RT"
   },
   {
-    "serialNumber": "QWER234ASDF8",
+    "serialNumber": "Q7M5V83WH4L2",
     "partNumber": "MD455C/A"
   },
   {
-    "serialNumber": "MN8L5V92HKJP",
+    "serialNumber": "T3N6Y94KM8P1",
     "partNumber": "MC834C/A"
   },
   {
-    "serialNumber": "C02TY67HGFR4",
+    "serialNumber": "Z9B4C72HXFW5",
     "partNumber": "Z0QX"
   },
   {
-    "serialNumber": "XY789ABC123D",
+    "serialNumber": "M4L8D63JKV7Q",
     "partNumber": "MQ2K2C/A"
   }
 ]
@@ -158,13 +182,40 @@ Page 9: found 68 devices
 ### Get Assigned MDM
 
 ```bash
-./asbmutil get-assigned-mdm F4K9X72HG3M5 | jq
+./asbmutil get-assigned-mdm P8R2K47NF5X9 | jq
 
 {
   "data": {
+    "serverType": "MDM",
+    "type": "mdmServers",
     "id": "C5E8B39F4A7D4E2C8931F6D4A2B8E5F7",
-    "type": "mdmServers"
+    "serverName": "MicroMDM"
+  },
+  "links": {
+    "related": "https://api-school.apple.com/v1/orgDevices/P8R2K47NF5X9/assignedServer",
+    "self": "https://api-school.apple.com/v1/orgDevices/P8R2K47NF5X9/relationships/assignedServer"
   }
+}
+```
+
+### Assign Devices
+
+```bash
+./asbmutil assign --serials P8R2K47NF5X9 --mdm Intune | jq
+
+{
+  "id": "f8a29c74-3b7e-4d2a-9c8f-1e5d4a7b2c9e",
+  "createdDateTime": "2025-01-15T14:32:18.45Z",
+  "mdmServerId": "B92F7A64E81C4D3F9067C2B5E8F43A71",
+  "activityType": "ASSIGN_DEVICES",
+  "status": "IN_PROGRESS",
+  "mdmServerName": "Intune",
+  "deviceCount": 1,
+  "mdmServerType": "MDM",
+  "updatedDateTime": "",
+  "deviceSerials": [
+    "P8R2K47NF5X9"
+  ]
 }
 ```
 
