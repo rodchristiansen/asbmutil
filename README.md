@@ -79,8 +79,8 @@ For organizations managing multiple ABM instances, you can create named profiles
 ./asbmutil list-devices --show-pagination
 
 # Device Operations (using specific profile)
-./asbmutil list-devices --profile "school-district"
-./asbmutil assign --serials P8R2K47NF5X9 --mdm "Intune" --profile "business-division"
+./asbmutil list-devices --profile "school-district-2"
+./asbmutil assign --serials P8R2K47NF5X9 --mdm "Intune" --profile "business-unit-2"
 
 # MDM Server Operations
 ./asbmutil list-mdm-servers
@@ -107,7 +107,7 @@ For organizations managing multiple ABM instances, you can create named profiles
 The profile system allows you to manage credentials for multiple ABM instances:
 
 * **Default Profile**: If no profile is specified, uses the "default" profile
-* **Named Profiles**: Create profiles with descriptive names like "school-east", "business-corp", etc.
+* **Named Profiles**: Create profiles with descriptive names like "school-east", "business-unit-3", etc.
 * **Current Profile**: One profile is always "current" and used by default
 * **Per-Command Override**: Use `--profile` on any command to override the current profile
 
@@ -142,9 +142,9 @@ The profile system allows you to manage credentials for multiple ABM instances:
 ./asbmutil config list-profiles
 
 Available profiles:
-  business-division - business.api - created Dec 15, 2024 at 2:30 PM
+  business-unit-2 - business.api - created Dec 15, 2024 at 2:30 PM
   default - school.api - created Dec 10, 2024 at 10:15 AM
-  school-district (current) - school.api - created Dec 12, 2024 at 9:45 AM
+  school-district-2 (current) - school.api - created Dec 12, 2024 at 9:45 AM
 ```
 
 ### Scripting with Multiple Profiles
@@ -155,8 +155,8 @@ For automation and scripts, you can use the `--profile` option to work with mult
 #!/bin/bash
 
 # Script to manage multiple ABM instances
-SCHOOL_PROFILE="school-district"
-BUSINESS_PROFILE="business-corp"
+SCHOOL_PROFILE="school-district-2"
+BUSINESS_PROFILE="business-unit-3"
 
 # List devices from school instance
 echo "School devices:"
