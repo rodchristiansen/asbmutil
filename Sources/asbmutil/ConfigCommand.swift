@@ -4,7 +4,7 @@ import Security
 struct Config: ParsableCommand {
     static let configuration = CommandConfiguration(
         abstract: "Store AxM credentials in macOS Keychain",
-        subcommands: [Set.self, Show.self]
+        subcommands: [Set.self, Show.self, Clear.self]
     )
 
     struct Set: ParsableCommand {
@@ -29,6 +29,31 @@ struct Config: ParsableCommand {
             print("SBM_CLIENT_ID=\(b.clientId)")
             print("SBM_KEY_ID=\(b.keyId)")
             print("PRIVATE_KEY=[\(b.privateKey.prefix(30))…]")
+        }
+    }
+
+    struct Clear: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            abstract: "Remove stored credentials from macOS Keychain"
+        )
+        
+        func run() throws {
+            let q: [String:Any] = [
+                kSecClass as String:       kSecClassGenericPassword,
+                kSecAttrService as String: Keychain.service,
+                kSecAttrAccount as String: "SBM_CREDENTIALS"
+            ]
+            
+            let status = SecItemDelete(q as CFDictionary)
+            
+            switch status {
+            case errSecSuccess:
+                print("credentials cleared")
+            case errSecItemNotFound:
+                print("no credentials found to clear")
+            default:
+                throw RuntimeError("keychain delete failed with status: \(status)")
+            }
         }
     }
 }
