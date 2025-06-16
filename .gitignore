@@ -43,3 +43,18 @@ playground.xcworkspace
 # ── Code injection & debugging helpers ──────────────────────────────
 iOSInjectionProject/
 *.memgraph
+
+# ── IDEs & editors ───────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.settings/
+.classpath
+.factorypath
+.metadata/
+.recommenders/
+*.sublime-project
+*.sublime-workspace
