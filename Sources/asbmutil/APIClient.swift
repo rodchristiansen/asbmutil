@@ -48,19 +48,31 @@ actor APIClient {
         return try await send(req)
     }
 
-    func listDevices() async throws -> [DeviceAttributes] {
+    func listDevices(limit: Int? = nil) async throws -> [DeviceAttributes] {
         var cursor: String? = nil
         var page = 1
+        var totalDevices = 0
         var out: [DeviceAttributes] = []
 
         repeat {
-            let r = try await fetchOrgDevicesPage(cursor: cursor, limit: nil)
-            FileHandle.standardError.write(Data("Page \(page): found \(r.data.count) devices\n".utf8))
+            let r = try await fetchOrgDevicesPage(cursor: cursor, limit: limit)
+            let pageDeviceCount = r.data.count
+            totalDevices += pageDeviceCount
+            
+            let limitInfo = limit.map { " (limit: \($0))" } ?? ""
+            FileHandle.standardError.write(Data("Page \(page): found \(pageDeviceCount) devices\(limitInfo), total so far: \(totalDevices)\n".utf8))
+            
             out += r.data.map(\.attributes)
             cursor = r.meta?.paging.nextCursor
             page += 1
+            
+            // Add a small delay between requests to be respectful to the API
+            if cursor != nil {
+                try await Task.sleep(nanoseconds: 100_000_000) // 0.1 second
+            }
         } while cursor != nil
 
+        FileHandle.standardError.write(Data("Pagination complete: \(totalDevices) total devices across \(page - 1) pages\n".utf8))
         return out
     }
 

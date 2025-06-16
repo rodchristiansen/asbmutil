@@ -7,10 +7,29 @@ struct ListDevices: AsyncParsableCommand {
         abstract: "List all organization devices"
     )
 
+    @Option(name: .customLong("limit"), help: "Number of devices per page (default: API default, typically 100)")
+    var limit: Int?
+    
+    @Flag(name: .customLong("show-pagination"), help: "Show detailed pagination information")
+    var showPagination: Bool = false
+
+    func validate() throws {
+        if let limit = limit {
+            guard limit > 0 && limit <= 1000 else {
+                throw ValidationError("Limit must be between 1 and 1000")
+            }
+        }
+    }
+
     func run() async throws {
         let credentials = try Creds.load()
         let client = try await APIClient(credentials: credentials)
-        let devices = try await client.listDevices()
+        
+        if showPagination {
+            FileHandle.standardError.write(Data("Starting device listing with pagination details...\n".utf8))
+        }
+        
+        let devices = try await client.listDevices(limit: limit)
         print(String(decoding: try JSONEncoder().encode(devices), as: UTF8.self))
     }
 }

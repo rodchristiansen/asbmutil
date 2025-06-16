@@ -41,6 +41,15 @@ cd .build/release/
 # list every device serial
 ./asbmutil list-devices
 
+# list devices with custom page size
+./asbmutil list-devices --limit 200
+
+# list devices with detailed pagination info
+./asbmutil list-devices --show-pagination
+
+# list devices with both custom limit and pagination details
+./asbmutil list-devices --limit 300 --show-pagination
+
 # list all device management services
 ./asbmutil list-mdm-servers
 
@@ -109,15 +118,16 @@ credentials cleared
 ```bash
 ./asbmutil list-devices | jq
 
-Page 1: found 100 devices
-Page 2: found 100 devices
-Page 3: found 100 devices
-Page 4: found 100 devices
-Page 5: found 100 devices
-Page 6: found 100 devices
-Page 7: found 100 devices
-Page 8: found 100 devices
-Page 9: found 68 devices
+Page 1: found 100 devices (limit: 100), total so far: 100
+Page 2: found 100 devices (limit: 100), total so far: 200
+Page 3: found 100 devices (limit: 100), total so far: 300
+Page 4: found 100 devices (limit: 100), total so far: 400
+Page 5: found 100 devices (limit: 100), total so far: 500
+Page 6: found 100 devices (limit: 100), total so far: 600
+Page 7: found 100 devices (limit: 100), total so far: 700
+Page 8: found 100 devices (limit: 100), total so far: 800
+Page 9: found 68 devices (limit: 100), total so far: 868
+Pagination complete: 868 total devices across 9 pages
 [
   {
     "serialNumber": "P8R2K47NF5X9",
