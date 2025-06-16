@@ -13,6 +13,9 @@ struct ListDevices: AsyncParsableCommand {
     @Flag(name: .customLong("show-pagination"), help: "Show detailed pagination information")
     var showPagination: Bool = false
 
+    @Option(name: .customLong("profile"), help: "Profile name to use for credentials")
+    var profileName: String?
+
     func validate() throws {
         if let limit = limit {
             guard limit > 0 && limit <= 1000 else {
@@ -22,7 +25,7 @@ struct ListDevices: AsyncParsableCommand {
     }
 
     func run() async throws {
-        let credentials = try Creds.load()
+        let credentials = try Creds.load(profileName: profileName)
         let client = try await APIClient(credentials: credentials)
         
         if showPagination {
@@ -47,6 +50,9 @@ struct Assign: AsyncParsableCommand {
     
     @Option(name: .customLong("mdm"), help: "MDM server name")
     var mdmName: String
+
+    @Option(name: .customLong("profile"), help: "Profile name to use for credentials")
+    var profileName: String?
     
     func validate() throws {
         guard (serials != nil) != (csvFile != nil) else {
@@ -55,7 +61,7 @@ struct Assign: AsyncParsableCommand {
     }
     
     func run() async throws {
-        let client = try await APIClient(credentials: Creds.load())
+        let client = try await APIClient(credentials: Creds.load(profileName: profileName))
         let serviceId = try await client.getMdmServerIdByName(mdmName)
         
         let serialNumbers: [String]
@@ -89,6 +95,9 @@ struct Unassign: AsyncParsableCommand {
     
     @Option(name: .customLong("mdm"), help: "MDM server name")
     var mdmName: String
+
+    @Option(name: .customLong("profile"), help: "Profile name to use for credentials")
+    var profileName: String?
     
     func validate() throws {
         guard (serials != nil) != (csvFile != nil) else {
@@ -97,7 +106,7 @@ struct Unassign: AsyncParsableCommand {
     }
     
     func run() async throws {
-        let client = try await APIClient(credentials: Creds.load())
+        let client = try await APIClient(credentials: Creds.load(profileName: profileName))
         let serviceId = try await client.getMdmServerIdByName(mdmName)
         
         let serialNumbers: [String]
@@ -125,8 +134,11 @@ struct BatchStatus: AsyncParsableCommand {
     )
     @Argument var id: String
 
+    @Option(name: .customLong("profile"), help: "Profile name to use for credentials")
+    var profileName: String?
+
     func run() async throws {
-        let client = try await APIClient(credentials: Creds.load())
+        let client = try await APIClient(credentials: Creds.load(profileName: profileName))
         print(try await client.activityStatus(id: id))
     }
 }
@@ -137,8 +149,11 @@ struct ListMdmServers: AsyncParsableCommand {
         abstract: "List all device management services in the organization"
     )
 
+    @Option(name: .customLong("profile"), help: "Profile name to use for credentials")
+    var profileName: String?
+
     func run() async throws {
-        let credentials = try Creds.load()
+        let credentials = try Creds.load(profileName: profileName)
         let client = try await APIClient(credentials: credentials)
         let servers = try await client.listMdmServers()
         print(String(decoding: try JSONEncoder().encode(servers), as: UTF8.self))
@@ -152,9 +167,12 @@ struct GetAssignedMdm: AsyncParsableCommand {
     )
     
     @Argument var deviceId: String
+
+    @Option(name: .customLong("profile"), help: "Profile name to use for credentials")
+    var profileName: String?
     
     func run() async throws {
-        let client = try await APIClient(credentials: Creds.load())
+        let client = try await APIClient(credentials: Creds.load(profileName: profileName))
         let assignedServer = try await client.getAssignedMdm(deviceId: deviceId)
         print(String(decoding: try JSONEncoder().encode(assignedServer), as: UTF8.self))
     }
