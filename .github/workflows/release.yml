@@ -18,7 +18,7 @@ jobs:
     - name: Verify Swift installation
       run: |
         swift --version
-        SWIFT_VERSION=$(swift --version | head -n1 | grep -oE '[0-9]+\.[0-9]+' | head -n1)
+        SWIFT_VERSION=$(swift --version | head -n1 | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n1)
         MAJOR_VERSION=$(echo $SWIFT_VERSION | cut -d. -f1)
         echo "Current Swift version: $SWIFT_VERSION (major: $MAJOR_VERSION)"
         
@@ -91,5 +91,3 @@ jobs:
         generate_release_notes: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        files: asbmutil-${{ steps.version.outputs.version }}.zip
-        generate_release_notes: true
