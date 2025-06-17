@@ -33,16 +33,25 @@ jobs:
           # Initialize swiftly and update environment
           ~/.swiftly/bin/swiftly init --quiet-shell-followup
           
-          # Install Swift 6.0.2
-          ~/.swiftly/bin/swiftly install 6.0.2
-          ~/.swiftly/bin/swiftly use 6.0.2
-          
-          # Source the environment and update PATH for this step and subsequent steps
+          # Source the environment first
           . "${SWIFTLY_HOME_DIR:-$HOME/.swiftly}/env.sh"
           echo "$HOME/.swiftly/bin" >> $GITHUB_PATH
           hash -r
           
-          # Verify new installation
+          # Check if swiftly init already installed Swift 6+
+          UPDATED_SWIFT_VERSION=$(swift --version | head -n1 | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n1)
+          UPDATED_MAJOR_VERSION=$(echo $UPDATED_SWIFT_VERSION | cut -d. -f1)
+          echo "Updated Swift version after swiftly init: $UPDATED_SWIFT_VERSION (major: $UPDATED_MAJOR_VERSION)"
+          
+          if [ "$UPDATED_MAJOR_VERSION" -lt 6 ]; then
+            echo "Still need Swift 6+, installing Swift 6.0.2..."
+            ~/.swiftly/bin/swiftly install 6.0.2
+            ~/.swiftly/bin/swiftly use 6.0.2
+          else
+            echo "Swift $UPDATED_SWIFT_VERSION already meets requirements (6+)"
+          fi
+          
+          # Verify final installation
           swift --version
           
           # Clean up
