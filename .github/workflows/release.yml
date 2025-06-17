@@ -30,17 +30,17 @@ jobs:
           curl -O https://download.swift.org/swiftly/darwin/swiftly.pkg
           installer -pkg swiftly.pkg -target CurrentUserHomeDirectory
           
-          # Initialize swiftly
+          # Initialize swiftly and update environment
           ~/.swiftly/bin/swiftly init --quiet-shell-followup
-          . "${SWIFTLY_HOME_DIR:-$HOME/.swiftly}/env.sh"
-          hash -r
           
           # Install Swift 6.0.2
           ~/.swiftly/bin/swiftly install 6.0.2
           ~/.swiftly/bin/swiftly use 6.0.2
           
-          # Update PATH for subsequent steps
-          echo "$HOME/.swiftly/toolchains/6.0.2/usr/bin" >> $GITHUB_PATH
+          # Source the environment and update PATH for this step and subsequent steps
+          . "${SWIFTLY_HOME_DIR:-$HOME/.swiftly}/env.sh"
+          echo "$HOME/.swiftly/bin" >> $GITHUB_PATH
+          hash -r
           
           # Verify new installation
           swift --version
