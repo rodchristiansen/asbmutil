@@ -15,9 +15,45 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
       
-    - name: Check Swift version
+    - name: Verify Swift installation
       run: |
         swift --version
+        SWIFT_VERSION=$(swift --version | head -n1 | grep -oE '[0-9]+\.[0-9]+' | head -n1)
+        MAJOR_VERSION=$(echo $SWIFT_VERSION | cut -d. -f1)
+        echo "Current Swift version: $SWIFT_VERSION (major: $MAJOR_VERSION)"
+        
+        if [ "$MAJOR_VERSION" -lt 6 ]; then
+          echo "Swift 6+ required but found Swift $SWIFT_VERSION"
+          echo "Installing Swift 6 toolchain..."
+          
+          # Download Swift 6.0.2 toolchain
+          SWIFT_URL="https://download.swift.org/swift-6.0.2-release/xcode/swift-6.0.2-RELEASE-osx.pkg"
+          echo "Downloading from: $SWIFT_URL"
+          curl -L -o swift-toolchain.pkg "$SWIFT_URL"
+          
+          # Verify download
+          if [ ! -f swift-toolchain.pkg ]; then
+            echo "Download failed, trying alternative method..."
+            # Try development snapshot instead
+            SWIFT_DEV_URL="https://download.swift.org/development/xcode/swift-DEVELOPMENT-SNAPSHOT-2024-11-26-a-osx.pkg"
+            curl -L -o swift-toolchain.pkg "$SWIFT_DEV_URL"
+          fi
+          
+          # Install toolchain
+          sudo installer -pkg swift-toolchain.pkg -target /
+          
+          # Update PATH to use new Swift
+          export PATH="/Library/Developer/Toolchains/swift-latest.xctoolchain/usr/bin:$PATH"
+          echo "/Library/Developer/Toolchains/swift-latest.xctoolchain/usr/bin" >> $GITHUB_PATH
+          
+          # Verify new installation
+          swift --version
+          
+          # Clean up
+          rm swift-toolchain.pkg
+        else
+          echo "Swift $SWIFT_VERSION meets requirements (6+)"
+        fi
         
     - name: Build binary
       run: |
