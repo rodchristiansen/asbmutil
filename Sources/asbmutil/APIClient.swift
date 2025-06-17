@@ -18,6 +18,11 @@ actor APIClient {
     private var token: Token
     private let creds: Credentials
     private let session: URLSession = plainSession  // use proxy-free session
+    
+    // Retry configuration
+    private let maxRetries = 3
+    private let baseDelaySeconds: Double = 1.0
+    private let maxDelaySeconds: Double = 60.0
 
     init(credentials: Credentials) async throws {
         creds = credentials
@@ -256,18 +261,106 @@ actor APIClient {
             urlReq.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
         
-        let (data, resp) = try await session.data(for: urlReq)
-        guard let http = resp as? HTTPURLResponse, 
-              http.statusCode == 200 || http.statusCode == 201 else {
-            // Print diagnostic information to stderr
-            FileHandle.standardError.write(
-                Data("HTTP \((resp as? HTTPURLResponse)?.statusCode ?? 0)\n".utf8)
-            )
-            FileHandle.standardError.write(data)
-            FileHandle.standardError.write(Data("\n".utf8))
-            throw RuntimeError("HTTP error")
+        return try await performRequestWithRetry(urlReq)
+    }
+    
+    private func performRequestWithRetry<T: Decodable>(_ urlReq: URLRequest) async throws -> T {
+        var lastError: Error?
+        
+        for attempt in 0...maxRetries {
+            do {
+                let (data, resp) = try await session.data(for: urlReq)
+                guard let http = resp as? HTTPURLResponse else {
+                    throw RuntimeError("Invalid response type")
+                }
+                
+                // Handle successful responses
+                if http.statusCode == 200 || http.statusCode == 201 {
+                    return try JSONDecoder().decode(T.self, from: data)
+                }
+                
+                // Handle 429 (Rate Limited) and other retryable errors
+                if shouldRetry(statusCode: http.statusCode, attempt: attempt) {
+                    let delay = calculateBackoffDelay(attempt: attempt, response: http)
+                    
+                    FileHandle.standardError.write(
+                        Data("HTTP \(http.statusCode) - Retrying in \(String(format: "%.1f", delay))s (attempt \(attempt + 1)/\(maxRetries + 1))\n".utf8)
+                    )
+                    
+                    try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                    continue
+                }
+                
+                // Non-retryable error - print diagnostic and throw
+                FileHandle.standardError.write(
+                    Data("HTTP \(http.statusCode)\n".utf8)
+                )
+                FileHandle.standardError.write(data)
+                FileHandle.standardError.write(Data("\n".utf8))
+                throw RuntimeError("HTTP error \(http.statusCode)")
+                
+            } catch {
+                lastError = error
+                
+                // Don't retry on decoding errors or other non-network errors
+                if !isNetworkError(error) || attempt == maxRetries {
+                    throw error
+                }
+                
+                let delay = calculateBackoffDelay(attempt: attempt, response: nil)
+                FileHandle.standardError.write(
+                    Data("Network error - Retrying in \(String(format: "%.1f", delay))s (attempt \(attempt + 1)/\(maxRetries + 1)): \(error.localizedDescription)\n".utf8)
+                )
+                
+                try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            }
         }
-        return try JSONDecoder().decode(T.self, from: data)
+        
+        throw lastError ?? RuntimeError("All retry attempts failed")
+    }
+    
+    private func shouldRetry(statusCode: Int, attempt: Int) -> Bool {
+        guard attempt < maxRetries else { return false }
+        
+        switch statusCode {
+        case 429: // Rate Limited
+            return true
+        case 500...599: // Server errors
+            return true
+        case 408: // Request Timeout
+            return true
+        default:
+            return false
+        }
+    }
+    
+    private func calculateBackoffDelay(attempt: Int, response: HTTPURLResponse?) -> Double {
+        // Check for Retry-After header in 429 responses
+        if let response = response,
+           response.statusCode == 429,
+           let retryAfterString = response.value(forHTTPHeaderField: "Retry-After"),
+           let retryAfter = Double(retryAfterString) {
+            return min(retryAfter, maxDelaySeconds)
+        }
+        
+        // Exponential backoff: baseDelay * 2^attempt with jitter
+        let exponentialDelay = baseDelaySeconds * pow(2.0, Double(attempt))
+        let jitter = Double.random(in: 0.8...1.2) // ±20% jitter
+        let delay = exponentialDelay * jitter
+        
+        return min(delay, maxDelaySeconds)
+    }
+    
+    private func isNetworkError(_ error: Error) -> Bool {
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .timedOut, .cannotConnectToHost, .networkConnectionLost, .notConnectedToInternet:
+                return true
+            default:
+                return false
+            }
+        }
+        return false
     }
 
     private static func fetchToken(_ c: Credentials,
