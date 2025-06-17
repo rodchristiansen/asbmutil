@@ -24,33 +24,29 @@ jobs:
         
         if [ "$MAJOR_VERSION" -lt 6 ]; then
           echo "Swift 6+ required but found Swift $SWIFT_VERSION"
-          echo "Installing Swift 6 toolchain..."
+          echo "Installing Swift 6 toolchain using swiftly..."
           
-          # Download Swift 6.0.2 toolchain
-          SWIFT_URL="https://download.swift.org/swift-6.0.2-release/xcode/swift-6.0.2-RELEASE-osx.pkg"
-          echo "Downloading from: $SWIFT_URL"
-          curl -L -o swift-toolchain.pkg "$SWIFT_URL"
+          # Install swiftly
+          curl -O https://download.swift.org/swiftly/darwin/swiftly.pkg
+          installer -pkg swiftly.pkg -target CurrentUserHomeDirectory
           
-          # Verify download
-          if [ ! -f swift-toolchain.pkg ]; then
-            echo "Download failed, trying alternative method..."
-            # Try development snapshot instead
-            SWIFT_DEV_URL="https://download.swift.org/development/xcode/swift-DEVELOPMENT-SNAPSHOT-2024-11-26-a-osx.pkg"
-            curl -L -o swift-toolchain.pkg "$SWIFT_DEV_URL"
-          fi
+          # Initialize swiftly
+          ~/.swiftly/bin/swiftly init --quiet-shell-followup
+          . "${SWIFTLY_HOME_DIR:-$HOME/.swiftly}/env.sh"
+          hash -r
           
-          # Install toolchain
-          sudo installer -pkg swift-toolchain.pkg -target /
+          # Install Swift 6.0.2
+          ~/.swiftly/bin/swiftly install 6.0.2
+          ~/.swiftly/bin/swiftly use 6.0.2
           
-          # Update PATH to use new Swift
-          export PATH="/Library/Developer/Toolchains/swift-latest.xctoolchain/usr/bin:$PATH"
-          echo "/Library/Developer/Toolchains/swift-latest.xctoolchain/usr/bin" >> $GITHUB_PATH
+          # Update PATH for subsequent steps
+          echo "$HOME/.swiftly/toolchains/6.0.2/usr/bin" >> $GITHUB_PATH
           
           # Verify new installation
           swift --version
           
           # Clean up
-          rm swift-toolchain.pkg
+          rm swiftly.pkg
         else
           echo "Swift $SWIFT_VERSION meets requirements (6+)"
         fi
@@ -91,6 +87,10 @@ jobs:
       if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
       uses: softprops/action-gh-release@v2
       with:
+        files: asbmutil-${{ steps.version.outputs.version }}.zip
+        generate_release_notes: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         files: asbmutil-${{ steps.version.outputs.version }}.zip
         generate_release_notes: true
       env:
