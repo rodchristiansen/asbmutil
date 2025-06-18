@@ -38,10 +38,10 @@ actor APIClient {
         return comp.url!
     }
 
-    private func fetchOrgDevicesPage(cursor: String?, limit: Int? = nil) async throws -> OrgDevicesResponse {
+    private func fetchOrgDevicesPage(cursor: String?, devicesPerPage: Int? = nil) async throws -> OrgDevicesResponse {
         var query: [URLQueryItem] = []
         if let c = cursor { query.append(URLQueryItem(name: "cursor", value: c)) }
-        if let l = limit { query.append(URLQueryItem(name: "limit", value: String(l))) }
+        if let l = devicesPerPage { query.append(URLQueryItem(name: "limit", value: String(l))) }
 
         let url = makeURL(path: "/v1/orgDevices", query: query)
 
@@ -53,23 +53,53 @@ actor APIClient {
         return try await send(req)
     }
 
-    func listDevices(limit: Int? = nil) async throws -> [DeviceAttributes] {
+    func listDevices(devicesPerPage: Int? = nil, totalLimit: Int? = nil, showPagination: Bool = false) async throws -> [DeviceAttributes] {
         var cursor: String? = nil
         var page = 1
         var totalDevices = 0
         var out: [DeviceAttributes] = []
 
         repeat {
-            let r = try await fetchOrgDevicesPage(cursor: cursor, limit: limit)
+            let r = try await fetchOrgDevicesPage(cursor: cursor, devicesPerPage: devicesPerPage)
             let pageDeviceCount = r.data.count
-            totalDevices += pageDeviceCount
+            let remainingNeeded = totalLimit.map { $0 - totalDevices }
             
-            let limitInfo = limit.map { " (limit: \($0))" } ?? ""
-            FileHandle.standardError.write(Data("Page \(page): found \(pageDeviceCount) devices\(limitInfo), total so far: \(totalDevices)\n".utf8))
+            // If we have a total limit, only take what we need
+            let devicesToTake = if let remaining = remainingNeeded {
+                min(pageDeviceCount, remaining)
+            } else {
+                pageDeviceCount
+            }
             
-            out += r.data.map(\.attributes)
+            let pageDevices = Array(r.data.prefix(devicesToTake))
+            totalDevices += devicesToTake
+            
+            if showPagination {
+                let pageSizeInfo = devicesPerPage.map { " (devices per page: \($0))" } ?? ""
+                let limitInfo = totalLimit.map { " [limit: \($0)]" } ?? ""
+                FileHandle.standardError.write(Data("Page \(page): retrieved \(devicesToTake)/\(pageDeviceCount) devices\(pageSizeInfo), total so far: \(totalDevices)\(limitInfo)\n".utf8))
+                
+                if let nextCursor = r.meta?.paging.nextCursor {
+                    FileHandle.standardError.write(Data("  Next cursor: \(String(nextCursor.prefix(20)))...\n".utf8))
+                } else {
+                    FileHandle.standardError.write(Data("  No more pages available\n".utf8))
+                }
+            } else {
+                let pageSizeInfo = devicesPerPage.map { " (devices per page: \($0))" } ?? ""
+                FileHandle.standardError.write(Data("Page \(page): found \(devicesToTake) devices\(pageSizeInfo), total so far: \(totalDevices)\n".utf8))
+            }
+            
+            out += pageDevices.map(\.attributes)
             cursor = r.meta?.paging.nextCursor
             page += 1
+            
+            // Check if we've reached our total limit
+            if let totalLimit = totalLimit, totalDevices >= totalLimit {
+                if showPagination {
+                    FileHandle.standardError.write(Data("Reached total limit of \(totalLimit) devices\n".utf8))
+                }
+                break
+            }
             
             // Add a small delay between requests to be respectful to the API
             if cursor != nil {
@@ -77,7 +107,8 @@ actor APIClient {
             }
         } while cursor != nil
 
-        FileHandle.standardError.write(Data("Pagination complete: \(totalDevices) total devices across \(page - 1) pages\n".utf8))
+        let limitStatus = totalLimit.map { " (limited to \($0))" } ?? ""
+        FileHandle.standardError.write(Data("Pagination complete: \(totalDevices) total devices across \(page - 1) pages\(limitStatus)\n".utf8))
         return out
     }
 
