@@ -7,8 +7,11 @@ struct ListDevices: AsyncParsableCommand {
         abstract: "List all organization devices"
     )
 
-    @Option(name: .customLong("limit"), help: "Number of devices per page (default: API default, typically 100)")
-    var limit: Int?
+    @Option(name: .customLong("devices-per-page"), help: "Number of devices per API request (default: API default, typically 100)")
+    var devicesPerPage: Int?
+    
+    @Option(name: .customLong("total-limit"), help: "Maximum total number of devices to retrieve (default: no limit)")
+    var totalLimit: Int?
     
     @Flag(name: .customLong("show-pagination"), help: "Show detailed pagination information")
     var showPagination: Bool = false
@@ -17,9 +20,14 @@ struct ListDevices: AsyncParsableCommand {
     var profileName: String?
 
     func validate() throws {
-        if let limit = limit {
-            guard limit > 0 && limit <= 1000 else {
-                throw ValidationError("Limit must be between 1 and 1000")
+        if let devicesPerPage = devicesPerPage {
+            guard devicesPerPage > 0 && devicesPerPage <= 1000 else {
+                throw ValidationError("Devices per page must be between 1 and 1000")
+            }
+        }
+        if let totalLimit = totalLimit {
+            guard totalLimit > 0 else {
+                throw ValidationError("Total limit must be greater than 0")
             }
         }
     }
@@ -30,9 +38,15 @@ struct ListDevices: AsyncParsableCommand {
         
         if showPagination {
             FileHandle.standardError.write(Data("Starting device listing with pagination details...\n".utf8))
+            if let totalLimit = totalLimit {
+                FileHandle.standardError.write(Data("Total device limit: \(totalLimit)\n".utf8))
+            }
+            if let devicesPerPage = devicesPerPage {
+                FileHandle.standardError.write(Data("Devices per page: \(devicesPerPage)\n".utf8))
+            }
         }
         
-        let devices = try await client.listDevices(limit: limit)
+        let devices = try await client.listDevices(devicesPerPage: devicesPerPage, totalLimit: totalLimit, showPagination: showPagination)
         print(String(decoding: try JSONEncoder().encode(devices), as: UTF8.self))
     }
 }

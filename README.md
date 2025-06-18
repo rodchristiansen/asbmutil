@@ -75,7 +75,9 @@ For organizations managing multiple ABM instances, you can create named profiles
 
 # Device Operations (using current profile)
 ./asbmutil list-devices
-./asbmutil list-devices --limit 200
+./asbmutil list-devices --devices-per-page 200
+./asbmutil list-devices --total-limit 50
+./asbmutil list-devices --total-limit 1000 --devices-per-page 100
 ./asbmutil list-devices --show-pagination
 
 # Device Operations (using specific profile)
@@ -220,15 +222,15 @@ credentials cleared
 ```bash
 ./asbmutil list-devices | jq
 
-Page 1: found 100 devices (limit: 100), total so far: 100
-Page 2: found 100 devices (limit: 100), total so far: 200
-Page 3: found 100 devices (limit: 100), total so far: 300
-Page 4: found 100 devices (limit: 100), total so far: 400
-Page 5: found 100 devices (limit: 100), total so far: 500
-Page 6: found 100 devices (limit: 100), total so far: 600
-Page 7: found 100 devices (limit: 100), total so far: 700
-Page 8: found 100 devices (limit: 100), total so far: 800
-Page 9: found 68 devices (limit: 100), total so far: 868
+Page 1: found 100 devices (devices per page: 100), total so far: 100
+Page 2: found 100 devices (devices per page: 100), total so far: 200
+Page 3: found 100 devices (devices per page: 100), total so far: 300
+Page 4: found 100 devices (devices per page: 100), total so far: 400
+Page 5: found 100 devices (devices per page: 100), total so far: 500
+Page 6: found 100 devices (devices per page: 100), total so far: 600
+Page 7: found 100 devices (devices per page: 100), total so far: 700
+Page 8: found 100 devices (devices per page: 100), total so far: 800
+Page 9: found 68 devices (devices per page: 100), total so far: 868
 Pagination complete: 868 total devices across 9 pages
 [
   {
@@ -252,6 +254,19 @@ Pagination complete: 868 total devices across 9 pages
     "partNumber": "MQ2K2C/A"
   }
 ]
+```
+
+### List Devices with Total Limit
+
+```bash
+./asbmutil list-devices --total-limit 10 --show-pagination
+
+Starting device listing with pagination details...
+Total device limit: 10
+Page 1: retrieved 10/100 devices (devices per page: 100), total so far: 10 [limit: 10]
+  No more pages available
+Reached total limit of 10 devices
+Pagination complete: 10 total devices across 1 pages (limited to 10)
 ```
 
 ### List MDM Servers
