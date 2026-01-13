@@ -12,7 +12,8 @@ struct ASBMUtil: AsyncParsableCommand {
             Unassign.self, 
             BatchStatus.self, 
             ListMdmServers.self, 
-            GetAssignedMdm.self
+            GetAssignedMdm.self,
+            GetAppleCare.self
         ]
     )
 }

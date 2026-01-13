@@ -78,8 +78,13 @@ struct DeviceAttributes: Decodable, Encodable, Sendable {
     let eid: StringOrArray?                  // The device's EID (if available)
     let imei: StringOrArray?                 // The device's IMEI (if available) - can be array for dual SIM
     let meid: StringOrArray?                 // The device's MEID (if available)
+    
+    // MAC Address attributes (API 1.2 - iOS, iPadOS, tvOS, visionOS)
     let wifiMacAddress: String?              // The device's Wi-Fi MAC address
     let bluetoothMacAddress: String?         // The device's Bluetooth MAC address
+    
+    // MAC Address attributes (API 1.4 - macOS specific)
+    let builtInEthernetMacAddress: String?   // The device's built-in Ethernet MAC address (macOS only)
     
     // Order and purchase information
     let orderDateTime: String?               // The date and time of placing the device's order
@@ -125,5 +130,31 @@ struct MdmServerWithId: Decodable, Encodable, Sendable {
     let serverType: String?
     let createdDateTime: String?
     let updatedDateTime: String?
+}
+
+// MARK: - AppleCare Coverage (API 1.3)
+
+struct AppleCareResponse: Decodable, Sendable {
+    let data: [AppleCareData]
+}
+
+struct AppleCareData: Decodable, Sendable {
+    let id: String
+    let type: String
+    let attributes: AppleCareAttributes
+}
+
+struct AppleCareAttributes: Decodable, Encodable, Sendable {
+    let agreementNumber: String?             // The AppleCare agreement number
+    let agreementType: String?               // Type of AppleCare agreement (e.g., "APPLECARE_PLUS")
+    let coverageStartDate: String?           // Start date of coverage
+    let coverageEndDate: String?             // End date of coverage
+    let status: String?                      // Coverage status (e.g., "ACTIVE", "EXPIRED")
+    let productDescription: String?          // Description of the AppleCare product
+}
+
+struct AppleCareCoverage: Codable, Sendable {
+    let deviceSerialNumber: String
+    let coverages: [AppleCareAttributes]
 }
 

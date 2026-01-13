@@ -274,6 +274,51 @@ actor APIClient {
         return server.id
     }
 
+    // MARK: - AppleCare Coverage (API 1.3)
+    
+    /// Get AppleCare coverage for a device by serial number
+    func getAppleCareCoverage(deviceSerialNumber: String) async throws -> AppleCareCoverage {
+        let response: AppleCareResponse = try await send(
+            Request(
+                method: .GET,
+                path: Endpoints.appleCare(deviceSerialNumber).path,
+                scope: creds.scope,
+                body: nil
+            )
+        )
+        
+        return AppleCareCoverage(
+            deviceSerialNumber: deviceSerialNumber,
+            coverages: response.data.map(\.attributes)
+        )
+    }
+    
+    /// Get AppleCare coverage for multiple devices
+    func getAppleCareCoverages(deviceSerialNumbers: [String]) async throws -> [AppleCareCoverage] {
+        var coverages: [AppleCareCoverage] = []
+        
+        for serial in deviceSerialNumbers {
+            do {
+                let coverage = try await getAppleCareCoverage(deviceSerialNumber: serial)
+                coverages.append(coverage)
+            } catch {
+                // If a device has no AppleCare coverage or there's an error, include it with empty coverages
+                coverages.append(AppleCareCoverage(
+                    deviceSerialNumber: serial,
+                    coverages: []
+                ))
+                FileHandle.standardError.write(Data("Warning: Could not get AppleCare coverage for \(serial): \(error.localizedDescription)\n".utf8))
+            }
+            
+            // Add a small delay between requests to be respectful to the API
+            if serial != deviceSerialNumbers.last {
+                try await Task.sleep(nanoseconds: 100_000_000) // 0.1 second
+            }
+        }
+        
+        return coverages
+    }
+
     func send<T: Decodable>(_ req: Request<T>) async throws -> T {
         if token.isExpired { token = try await Self.fetchToken(creds, session: session) }
         
