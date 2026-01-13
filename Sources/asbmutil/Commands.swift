@@ -192,6 +192,60 @@ struct GetAssignedMdm: AsyncParsableCommand {
     }
 }
 
+// MARK: - AppleCare Commands (API 1.3)
+
+struct GetAppleCare: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "get-applecare",
+        abstract: "Get AppleCare coverage for a device"
+    )
+    
+    @Option(name: .customLong("serial"), help: "Device serial number")
+    var serial: String?
+    
+    @Option(name: .customLong("serials"), help: "Comma-separated list of device serial numbers")
+    var serials: String?
+    
+    @Option(name: .customLong("csv-file"), help: "Path to CSV file containing serial numbers (first column)")
+    var csvFile: String?
+
+    @Option(name: .customLong("profile"), help: "Profile name to use for credentials")
+    var profileName: String?
+    
+    func validate() throws {
+        let optionCount = [serial != nil, serials != nil, csvFile != nil].filter { $0 }.count
+        guard optionCount == 1 else {
+            throw ValidationError("Must specify exactly one of --serial, --serials, or --csv-file")
+        }
+    }
+    
+    func run() async throws {
+        let client = try await APIClient(credentials: Creds.load(profileName: profileName))
+        
+        let serialNumbers: [String]
+        if let serial = serial {
+            serialNumbers = [serial]
+        } else if let serials = serials {
+            serialNumbers = serials.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
+        } else if let csvFile = csvFile {
+            serialNumbers = try readSerialsFromCSV(filePath: csvFile)
+        } else {
+            throw ValidationError("No serial numbers provided")
+        }
+        
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .prettyPrinted
+        
+        if serialNumbers.count == 1 {
+            let coverage = try await client.getAppleCareCoverage(deviceSerialNumber: serialNumbers[0])
+            print(String(decoding: try encoder.encode(coverage), as: UTF8.self))
+        } else {
+            let coverages = try await client.getAppleCareCoverages(deviceSerialNumbers: serialNumbers)
+            print(String(decoding: try encoder.encode(coverages), as: UTF8.self))
+        }
+    }
+}
+
 // Helper function to read serial numbers from CSV file
 private func readSerialsFromCSV(filePath: String) throws -> [String] {
     let url = URL(fileURLWithPath: filePath)

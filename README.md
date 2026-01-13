@@ -13,6 +13,9 @@ Get devices info and assign/unassign MDM servers in bulk.
 * Paginated device fetch for large inventories
 * CSV file support for bulk operations
 * StrictConcurrency enabled
+* **NEW (API 1.4)**: Wi-Fi, Bluetooth, and built-in Ethernet MAC addresses for macOS
+* **NEW (API 1.3)**: AppleCare coverage lookup for devices
+* **NEW (API 1.2)**: Wi-Fi and Bluetooth MAC addresses for iOS, iPadOS, tvOS, and visionOS
 
 ## Quick setup
 
@@ -87,6 +90,11 @@ For organizations managing multiple ABM instances, you can create named profiles
 # MDM Server Operations
 ./asbmutil list-mdm-servers
 ./asbmutil get-assigned-mdm P8R2K47NF5X9
+
+# AppleCare Coverage (API 1.3)
+./asbmutil get-applecare --serial P8R2K47NF5X9
+./asbmutil get-applecare --serials P8R2K47NF5X9,Q7M5V83WH4L2
+./asbmutil get-applecare --csv-file devices.csv
 
 # Credential Management
 ./asbmutil config show                           # Show current profile credentials
@@ -322,6 +330,26 @@ Pagination complete: 10 total devices across 1 pages (limited to 10)
     "related": "https://api-school.apple.com/v1/orgDevices/P8R2K47NF5X9/assignedServer",
     "self": "https://api-school.apple.com/v1/orgDevices/P8R2K47NF5X9/relationships/assignedServer"
   }
+}
+```
+
+### Get AppleCare Coverage (API 1.3)
+
+```bash
+./asbmutil get-applecare --serial P8R2K47NF5X9 | jq
+
+{
+  "deviceSerialNumber": "P8R2K47NF5X9",
+  "coverages": [
+    {
+      "agreementNumber": "AC123456789",
+      "agreementType": "APPLECARE_PLUS",
+      "coverageStartDate": "2024-01-15T00:00:00Z",
+      "coverageEndDate": "2027-01-15T00:00:00Z",
+      "status": "ACTIVE",
+      "productDescription": "AppleCare+ for Mac"
+    }
+  ]
 }
 ```
 
