@@ -15,6 +15,7 @@ Get devices info and assign/unassign MDM servers in bulk.
 * StrictConcurrency enabled
 * **NEW (API 1.4)**: Wi-Fi, Bluetooth, and built-in Ethernet MAC addresses for macOS
 * **NEW (API 1.3)**: AppleCare coverage lookup for devices
+* **NEW**: Consolidated `get-devices-info` command: device attributes, AppleCare coverage, and assigned MDM in one call
 * **NEW (API 1.2)**: Wi-Fi and Bluetooth MAC addresses for iOS, iPadOS, tvOS, and visionOS
 
 ## Quick setup
@@ -89,12 +90,12 @@ For organizations managing multiple ABM instances, you can create named profiles
 
 # MDM Server Operations
 ./asbmutil list-mdm-servers
-./asbmutil get-assigned-mdm P8R2K47NF5X9
 
-# AppleCare Coverage (API 1.3)
-./asbmutil get-applecare --serial P8R2K47NF5X9
-./asbmutil get-applecare --serials P8R2K47NF5X9,Q7M5V83WH4L2
-./asbmutil get-applecare --csv-file devices.csv
+# Get Device Info (device attributes + AppleCare + assigned MDM)
+./asbmutil get-devices-info --serials P8R2K47NF5X9
+./asbmutil get-devices-info --serials P8R2K47NF5X9,Q7M5V83WH4L2
+./asbmutil get-devices-info --csv-file devices.csv
+./asbmutil get-devices-info --mdm --serials P8R2K47NF5X9  # MDM info only
 
 # Credential Management
 ./asbmutil config show                           # Show current profile credentials
@@ -316,6 +317,8 @@ Pagination complete: 10 total devices across 1 pages (limited to 10)
 
 ### Get Assigned MDM
 
+> **Note:** `get-assigned-mdm` is now a hidden alias. Assigned MDM info is included in `get-devices-info` output.
+
 ```bash
 ./asbmutil get-assigned-mdm P8R2K47NF5X9 | jq
 
@@ -333,23 +336,51 @@ Pagination complete: 10 total devices across 1 pages (limited to 10)
 }
 ```
 
-### Get AppleCare Coverage (API 1.3)
+### Get Devices Info (device attributes + AppleCare + assigned MDM)
 
 ```bash
-./asbmutil get-applecare --serial P8R2K47NF5X9 | jq
+./asbmutil get-devices-info --serials P8R2K47NF5X9 | jq
 
 {
-  "deviceSerialNumber": "P8R2K47NF5X9",
-  "coverages": [
+  "serialNumber": "P8R2K47NF5X9",
+  "partNumber": "Z0RT",
+  "assetTag": "ASSET-001",
+  "os": "macOS",
+  "deviceFamily": "Mac",
+  "status": "ASSIGNED",
+  "color": "SPACE_GRAY",
+  "wifiMacAddress": "AA:BB:CC:DD:EE:FF",
+  "bluetoothMacAddress": "FF:EE:DD:CC:BB:AA",
+  "ethernetMacAddress": "11:22:33:44:55:66",
+  "appleCareCoverage": [
     {
       "agreementNumber": "AC123456789",
-      "agreementType": "APPLECARE_PLUS",
-      "coverageStartDate": "2024-01-15T00:00:00Z",
-      "coverageEndDate": "2027-01-15T00:00:00Z",
+      "description": "AppleCare+ for Mac",
+      "startDateTime": "2024-01-15T00:00:00Z",
+      "endDateTime": "2027-01-15T00:00:00Z",
       "status": "ACTIVE",
-      "productDescription": "AppleCare+ for Mac"
+      "paymentType": "PAID",
+      "isRenewable": true,
+      "isCanceled": false
     }
-  ]
+  ],
+  "assignedMdm": {
+    "id": "C5E8B39F4A7D4E2C8931F6D4A2B8E5F7",
+    "serverName": "MicroMDM",
+    "serverType": "MDM"
+  }
+}
+```
+
+Use `--mdm` to output only assigned MDM info:
+
+```bash
+./asbmutil get-devices-info --mdm --serials P8R2K47NF5X9 | jq
+
+{
+  "id": "C5E8B39F4A7D4E2C8931F6D4A2B8E5F7",
+  "serverName": "MicroMDM",
+  "serverType": "MDM"
 }
 ```
 
