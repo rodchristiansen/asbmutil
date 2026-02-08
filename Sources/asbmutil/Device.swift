@@ -106,6 +106,36 @@ struct DeviceAttributes: Decodable, Encodable, Sendable {
     let deviceManagementServiceId: String?   // optional - for assigned devices
 }
 
+/// Combined device info with AppleCare coverage and assigned MDM
+struct DeviceInfo: Encodable, Sendable {
+    let device: DeviceAttributes
+    let appleCareCoverage: [AppleCareAttributes]?
+    let assignedMdm: AssignedMdmInfo?
+    
+    func encode(to encoder: Encoder) throws {
+        // Flatten device attributes into top level
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try device.encode(to: encoder)
+        if let coverage = appleCareCoverage, !coverage.isEmpty {
+            try container.encode(coverage, forKey: .appleCareCoverage)
+        }
+        if let mdm = assignedMdm {
+            try container.encode(mdm, forKey: .assignedMdm)
+        }
+    }
+    
+    private enum CodingKeys: String, CodingKey {
+        case appleCareCoverage
+        case assignedMdm
+    }
+}
+
+struct AssignedMdmInfo: Encodable, Sendable {
+    let id: String
+    let serverName: String?
+    let serverType: String?
+}
+
 struct MdmServersResponse: Decodable, Sendable {
     let data: [MdmServerData]
     let meta: Meta?

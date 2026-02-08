@@ -34,7 +34,7 @@ struct ListDevices: AsyncParsableCommand {
 
     func run() async throws {
         let credentials = try Creds.load(profileName: profileName)
-        let client = try await APIClient(credentials: credentials)
+        let client = try await APIClient(credentials: credentials, profileName: profileName)
         
         if showPagination {
             FileHandle.standardError.write(Data("Starting device listing with pagination details...\n".utf8))
@@ -75,7 +75,7 @@ struct Assign: AsyncParsableCommand {
     }
     
     func run() async throws {
-        let client = try await APIClient(credentials: Creds.load(profileName: profileName))
+        let client = try await APIClient(credentials: Creds.load(profileName: profileName), profileName: profileName)
         let serviceId = try await client.getMdmServerIdByName(mdmName)
         
         let serialNumbers: [String]
@@ -120,7 +120,7 @@ struct Unassign: AsyncParsableCommand {
     }
     
     func run() async throws {
-        let client = try await APIClient(credentials: Creds.load(profileName: profileName))
+        let client = try await APIClient(credentials: Creds.load(profileName: profileName), profileName: profileName)
         let serviceId = try await client.getMdmServerIdByName(mdmName)
         
         let serialNumbers: [String]
@@ -152,7 +152,7 @@ struct BatchStatus: AsyncParsableCommand {
     var profileName: String?
 
     func run() async throws {
-        let client = try await APIClient(credentials: Creds.load(profileName: profileName))
+        let client = try await APIClient(credentials: Creds.load(profileName: profileName), profileName: profileName)
         print(try await client.activityStatus(id: id))
     }
 }
@@ -168,7 +168,7 @@ struct ListMdmServers: AsyncParsableCommand {
 
     func run() async throws {
         let credentials = try Creds.load(profileName: profileName)
-        let client = try await APIClient(credentials: credentials)
+        let client = try await APIClient(credentials: credentials, profileName: profileName)
         let servers = try await client.listMdmServers()
         print(String(decoding: try JSONEncoder().encode(servers), as: UTF8.self))
     }
@@ -177,7 +177,8 @@ struct ListMdmServers: AsyncParsableCommand {
 struct GetAssignedMdm: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "get-assigned-mdm",
-        abstract: "Get the assigned device management service ID for a device"
+        abstract: "Get the assigned device management service ID for a device",
+        shouldDisplay: false
     )
     
     @Argument var deviceId: String
@@ -186,46 +187,43 @@ struct GetAssignedMdm: AsyncParsableCommand {
     var profileName: String?
     
     func run() async throws {
-        let client = try await APIClient(credentials: Creds.load(profileName: profileName))
+        let client = try await APIClient(credentials: Creds.load(profileName: profileName), profileName: profileName)
         let assignedServer = try await client.getAssignedMdm(deviceId: deviceId)
         print(String(decoding: try JSONEncoder().encode(assignedServer), as: UTF8.self))
     }
 }
 
-// MARK: - AppleCare Commands (API 1.3)
+// MARK: - Get Devices Info (includes AppleCare coverage and assigned MDM)
 
-struct GetAppleCare: AsyncParsableCommand {
+struct GetDevicesInfo: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
-        commandName: "get-applecare",
-        abstract: "Get AppleCare coverage for a device"
+        commandName: "get-devices-info",
+        abstract: "Get full device information, AppleCare coverage, and assigned MDM by serial number"
     )
     
-    @Option(name: .customLong("serial"), help: "Device serial number")
-    var serial: String?
-    
-    @Option(name: .customLong("serials"), help: "Comma-separated list of device serial numbers")
+    @Option(name: .customLong("serials"), help: "One or more serial numbers, comma-separated")
     var serials: String?
     
     @Option(name: .customLong("csv-file"), help: "Path to CSV file containing serial numbers (first column)")
     var csvFile: String?
 
+    @Flag(name: .customLong("mdm"), help: "Only output assigned MDM server info")
+    var mdmOnly: Bool = false
+
     @Option(name: .customLong("profile"), help: "Profile name to use for credentials")
     var profileName: String?
     
     func validate() throws {
-        let optionCount = [serial != nil, serials != nil, csvFile != nil].filter { $0 }.count
-        guard optionCount == 1 else {
-            throw ValidationError("Must specify exactly one of --serial, --serials, or --csv-file")
+        guard (serials != nil) != (csvFile != nil) else {
+            throw ValidationError("Must specify either --serials or --csv-file, but not both")
         }
     }
     
     func run() async throws {
-        let client = try await APIClient(credentials: Creds.load(profileName: profileName))
+        let client = try await APIClient(credentials: Creds.load(profileName: profileName), profileName: profileName)
         
         let serialNumbers: [String]
-        if let serial = serial {
-            serialNumbers = [serial]
-        } else if let serials = serials {
+        if let serials = serials {
             serialNumbers = serials.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
         } else if let csvFile = csvFile {
             serialNumbers = try readSerialsFromCSV(filePath: csvFile)
@@ -237,11 +235,31 @@ struct GetAppleCare: AsyncParsableCommand {
         encoder.outputFormatting = .prettyPrinted
         
         if serialNumbers.count == 1 {
-            let coverage = try await client.getAppleCareCoverage(deviceSerialNumber: serialNumbers[0])
-            print(String(decoding: try encoder.encode(coverage), as: UTF8.self))
+            let device = try await client.getDevice(serialNumber: serialNumbers[0])
+            if mdmOnly {
+                print(String(decoding: try encoder.encode(device.assignedMdm), as: UTF8.self))
+            } else {
+                print(String(decoding: try encoder.encode(device), as: UTF8.self))
+            }
         } else {
-            let coverages = try await client.getAppleCareCoverages(deviceSerialNumbers: serialNumbers)
-            print(String(decoding: try encoder.encode(coverages), as: UTF8.self))
+            var devices: [DeviceInfo] = []
+            for serial in serialNumbers {
+                do {
+                    let device = try await client.getDevice(serialNumber: serial)
+                    devices.append(device)
+                } catch {
+                    FileHandle.standardError.write(Data("Warning: Could not get device info for \(serial): \(error.localizedDescription)\n".utf8))
+                }
+                if serial != serialNumbers.last {
+                    try await Task.sleep(nanoseconds: 100_000_000)
+                }
+            }
+            if mdmOnly {
+                let mdmInfos = devices.map { $0.assignedMdm }
+                print(String(decoding: try encoder.encode(mdmInfos), as: UTF8.self))
+            } else {
+                print(String(decoding: try encoder.encode(devices), as: UTF8.self))
+            }
         }
     }
 }
