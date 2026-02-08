@@ -146,11 +146,14 @@ struct AppleCareData: Decodable, Sendable {
 
 struct AppleCareAttributes: Decodable, Encodable, Sendable {
     let agreementNumber: String?             // The AppleCare agreement number
-    let agreementType: String?               // Type of AppleCare agreement (e.g., "APPLECARE_PLUS")
-    let coverageStartDate: String?           // Start date of coverage
-    let coverageEndDate: String?             // End date of coverage
+    let description: String?                 // Description of the AppleCare product
+    let startDateTime: String?               // Start date/time of coverage
+    let endDateTime: String?                 // End date/time of coverage
     let status: String?                      // Coverage status (e.g., "ACTIVE", "EXPIRED")
-    let productDescription: String?          // Description of the AppleCare product
+    let paymentType: String?                 // Payment type for the coverage
+    let isRenewable: Bool?                   // Whether the coverage is renewable
+    let isCanceled: Bool?                    // Whether the coverage is canceled
+    let contractCancelDateTime: String?      // Date/time when coverage was canceled
 }
 
 struct AppleCareCoverage: Codable, Sendable {
