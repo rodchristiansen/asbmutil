@@ -157,4 +157,52 @@ enum Keychain {
         SecItemDelete(q as CFDictionary)
         SecItemAdd(q as CFDictionary, nil)
     }
+
+    // MARK: - Token Cache
+
+    /// Save a token to the keychain for a specific profile
+    @discardableResult
+    static func saveToken(_ token: Token, profileName: String = "default") -> OSStatus {
+        let data = try! JSONEncoder().encode(token)
+        let accountName = "SBM_TOKEN_\(profileName)"
+        let q: [String:Any] = [
+            kSecClass as String:        kSecClassGenericPassword,
+            kSecAttrService as String:  service,
+            kSecAttrAccount as String:  accountName,
+            kSecValueData as String:    data
+        ]
+        SecItemDelete(q as CFDictionary)
+        return SecItemAdd(q as CFDictionary, nil)
+    }
+
+    /// Load a cached token from the keychain for a specific profile
+    static func loadToken(profileName: String = "default") -> Token? {
+        let accountName = "SBM_TOKEN_\(profileName)"
+        let q: [String:Any] = [
+            kSecClass as String:       kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: accountName,
+            kSecReturnData as String:  true,
+            kSecMatchLimit as String:  kSecMatchLimitOne
+        ]
+        var out: AnyObject?
+        guard SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess,
+              let d = out as? Data,
+              let token = try? JSONDecoder().decode(Token.self, from: d) else {
+            return nil
+        }
+        return token
+    }
+
+    /// Delete cached token for a profile
+    @discardableResult
+    static func deleteToken(profileName: String = "default") -> OSStatus {
+        let accountName = "SBM_TOKEN_\(profileName)"
+        let q: [String:Any] = [
+            kSecClass as String:       kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: accountName
+        ]
+        return SecItemDelete(q as CFDictionary)
+    }
 }
