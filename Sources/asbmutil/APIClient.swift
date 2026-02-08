@@ -8,15 +8,10 @@ private let plainSession: URLSession = {
     return URLSession(configuration: cfg)
 }()
 
-private let formAllowed: CharacterSet = {
-    var s = CharacterSet.alphanumerics
-    s.insert(charactersIn: "-._~")      // RFC 3986 unreserved
-    return s
-}()
-
 actor APIClient {
     private var token: Token
     private let creds: Credentials
+    private let profileName: String
     private let session: URLSession = plainSession  // use proxy-free session
     
     // Retry configuration
@@ -24,9 +19,17 @@ actor APIClient {
     private let baseDelaySeconds: Double = 1.0
     private let maxDelaySeconds: Double = 60.0
 
-    init(credentials: Credentials) async throws {
+    init(credentials: Credentials, profileName: String? = nil) async throws {
         creds = credentials
-        token = try await Self.fetchToken(creds, session: session)
+        self.profileName = profileName ?? Keychain.getCurrentProfile()
+        
+        // Try to load a cached token first
+        if let cached = Keychain.loadToken(profileName: self.profileName), !cached.isExpired {
+            token = cached
+        } else {
+            token = try await Self.fetchToken(creds, session: session)
+            Keychain.saveToken(token, profileName: self.profileName)
+        }
     }
 
     private func makeURL(path: String, query: [URLQueryItem] = []) -> URL {
@@ -112,14 +115,6 @@ actor APIClient {
         return out
     }
 
-    func assign(serials: [String], toService serviceId: String) async throws -> ActivityDetails {
-        return try await createDeviceActivity(
-            activityType: "ASSIGN_DEVICES",
-            serials: serials,
-            serviceId: serviceId
-        )
-    }
-
     func createDeviceActivity(activityType: String, serials: [String], serviceId: String) async throws -> ActivityDetails {
         struct ActivityResponse: Decodable {
             let data: ActivityData
@@ -186,10 +181,6 @@ actor APIClient {
             mdmServerType: serverDetails?.serverType,
             mdmServerId: serviceId
         )
-    }
-
-    func batchStatus(id: String) async throws -> String {
-        return try await activityStatus(id: id)
     }
 
     func activityStatus(id: String) async throws -> String {
@@ -274,6 +265,55 @@ actor APIClient {
         return server.id
     }
 
+    // MARK: - Get Device by Serial
+    
+    /// Get a single device's full attributes by serial number
+    func getDevice(serialNumber: String) async throws -> DeviceInfo {
+        struct SingleDeviceResponse: Decodable {
+            let data: DeviceData
+        }
+        let response: SingleDeviceResponse = try await send(
+            Request(
+                method: .GET,
+                path: Endpoints.orgDevice(serialNumber).path,
+                scope: creds.scope,
+                body: nil
+            )
+        )
+        
+        // Fetch AppleCare coverage (non-fatal if it fails)
+        var coverages: [AppleCareAttributes]? = nil
+        do {
+            let acResponse = try await getAppleCareCoverage(deviceSerialNumber: serialNumber)
+            if !acResponse.coverages.isEmpty {
+                coverages = acResponse.coverages
+            }
+        } catch {
+            // Device may not have AppleCare — that's fine
+        }
+        
+        // Fetch assigned MDM server (non-fatal if it fails)
+        var mdmInfo: AssignedMdmInfo? = nil
+        do {
+            let mdmResponse = try await getAssignedMdm(deviceId: serialNumber)
+            if let data = mdmResponse.data {
+                mdmInfo = AssignedMdmInfo(
+                    id: data.id,
+                    serverName: data.serverName,
+                    serverType: data.serverType
+                )
+            }
+        } catch {
+            // Device may not be assigned — that's fine
+        }
+        
+        return DeviceInfo(
+            device: response.data.attributes,
+            appleCareCoverage: coverages,
+            assignedMdm: mdmInfo
+        )
+    }
+
     // MARK: - AppleCare Coverage (API 1.3)
     
     /// Get AppleCare coverage for a device by serial number
@@ -292,35 +332,12 @@ actor APIClient {
             coverages: response.data.map(\.attributes)
         )
     }
-    
-    /// Get AppleCare coverage for multiple devices
-    func getAppleCareCoverages(deviceSerialNumbers: [String]) async throws -> [AppleCareCoverage] {
-        var coverages: [AppleCareCoverage] = []
-        
-        for serial in deviceSerialNumbers {
-            do {
-                let coverage = try await getAppleCareCoverage(deviceSerialNumber: serial)
-                coverages.append(coverage)
-            } catch {
-                // If a device has no AppleCare coverage or there's an error, include it with empty coverages
-                coverages.append(AppleCareCoverage(
-                    deviceSerialNumber: serial,
-                    coverages: []
-                ))
-                FileHandle.standardError.write(Data("Warning: Could not get AppleCare coverage for \(serial): \(error.localizedDescription)\n".utf8))
-            }
-            
-            // Add a small delay between requests to be respectful to the API
-            if serial != deviceSerialNumbers.last {
-                try await Task.sleep(nanoseconds: 100_000_000) // 0.1 second
-            }
-        }
-        
-        return coverages
-    }
 
     func send<T: Decodable>(_ req: Request<T>) async throws -> T {
-        if token.isExpired { token = try await Self.fetchToken(creds, session: session) }
+        if token.isExpired {
+            token = try await Self.fetchToken(creds, session: session)
+            Keychain.saveToken(token, profileName: profileName)
+        }
         
         let url: URL = req.path.hasPrefix("https://")
             ? URL(string: req.path)!
@@ -544,7 +561,7 @@ private func convertSEC1toPKCS8(_ sec1: String) throws -> String? {
     return p.terminationStatus == 0 ? pkcs8 : nil
 }
 
-// Add response types at the end of the file
+// MARK: - Assigned Server Response
 struct AssignedServerResponse: Codable {
     let data: AssignedServerData?
     let links: AssignedServerLinks?
@@ -560,7 +577,7 @@ struct AssignedServerLinks: Codable {
     let related: String
 }
 
-// Add enhanced response types at the end of the file
+// MARK: - Enhanced Assigned Server Response
 struct EnhancedAssignedServerResponse: Codable {
     let data: EnhancedAssignedServerData?
     let links: AssignedServerLinks?
@@ -573,7 +590,7 @@ struct EnhancedAssignedServerData: Codable {
     let serverType: String?
 }
 
-// Add new response structures and enhance the createDeviceActivity method to return detailed information.
+// MARK: - Activity Details
 struct ActivityDetails: Codable {
     let id: String
     let activityType: String

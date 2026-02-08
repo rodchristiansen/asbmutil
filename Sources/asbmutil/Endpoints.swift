@@ -11,17 +11,15 @@ enum Endpoints {
             fatalError("unknown scope")
         }
     }
-    case devices
-    case device(String)
+    case orgDevice(String)              // v1 single device lookup by serial
     case orgDeviceActivities
     case orgDeviceActivity(String)
     case mdmServers
-    case appleCare(String)  // API 1.3: AppleCare coverage for a device
+    case appleCare(String)               // API 1.3: AppleCare coverage for a device
 
     var path: String {
         switch self {
-        case .devices: return "/devices"
-        case .device(let id): return "/devices/\(id)"
+        case .orgDevice(let serial): return "/v1/orgDevices/\(serial)"
         case .orgDeviceActivities: return "/v1/orgDeviceActivities"
         case .orgDeviceActivity(let id): return "/v1/orgDeviceActivities/\(id)"
         case .mdmServers: return "/v1/mdmServers"
