@@ -18,37 +18,12 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
       
-    - name: Verify Swift installation
+    - name: Select Xcode with Swift 6+
       run: |
+        # Use Xcode 16.1+ which includes Swift 6
+        sudo xcode-select -s /Applications/Xcode_16.1.app
         swift --version
-        SWIFT_VERSION=$(swift --version | head -n1 | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n1)
-        MAJOR_VERSION=$(echo $SWIFT_VERSION | cut -d. -f1)
-        echo "Current Swift version: $SWIFT_VERSION (major: $MAJOR_VERSION)"
-        
-        if [ "$MAJOR_VERSION" -lt 6 ]; then
-          echo "Swift 6+ required but found Swift $SWIFT_VERSION"
-          echo "Installing Swift 6 toolchain using swiftly..."
-          
-          # Install swiftly
-          curl -O https://download.swift.org/swiftly/darwin/swiftly.pkg
-          installer -pkg swiftly.pkg -target CurrentUserHomeDirectory
-          
-          # Initialize swiftly - this will install the latest Swift 6
-          ~/.swiftly/bin/swiftly init --quiet-shell-followup
-          
-          # Source the environment and update PATH
-          . "${SWIFTLY_HOME_DIR:-$HOME/.swiftly}/env.sh"
-          echo "$HOME/.swiftly/bin" >> $GITHUB_PATH
-          hash -r
-          
-          # Verify installation
-          swift --version
-          
-          # Clean up
-          rm swiftly.pkg
-        else
-          echo "Swift $SWIFT_VERSION meets requirements (6+)"
-        fi
+        echo "Swift is ready for build"
         
     - name: Build binary
       run: |
