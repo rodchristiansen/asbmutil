@@ -30,6 +30,36 @@ swift build -c release
 
 Binary: `.build/release/asbmutil`
 
+### Build with Makefile
+
+The included Makefile provides easy targets for building, signing, notarizing, and installing:
+
+```bash
+# Build, sign, notarize, and install to /usr/local/bin in one command
+make release
+
+# Individual steps
+make build          # Build release binary
+make sign           # Build and sign
+make notarize       # Build, sign, and notarize
+make install        # Complete process and install to /usr/local/bin
+make clean          # Remove build artifacts
+make help           # Show all available targets
+```
+
+**First-time setup for notarization:**
+
+```bash
+# Show setup instructions
+make setup-notary
+
+# Then follow the instructions to store your credentials
+xcrun notarytool store-credentials \
+  --apple-id YOUR_APPLE_ID \
+  --team-id 7TF6CSP83S \
+  AC_PASSWORD
+```
+
 ### Save your Credentials to Keychain
 
 ```bash
@@ -413,7 +443,26 @@ Use `--mdm` to output only assigned MDM info:
 
 ## Code Signing & Notarization
 
-For distribution, sign and notarize the binary:
+### Using Makefile (Recommended)
+
+The easiest way to build a signed and notarized binary:
+
+```bash
+# One command to build, sign, notarize, and install
+make release
+
+# Or step by step
+make build      # Build release binary
+make sign       # Sign with Developer ID
+make notarize   # Submit for notarization
+make install    # Install to /usr/local/bin
+```
+
+See the [Quick setup](#quick-setup) section for notarization credential setup.
+
+### Manual Process
+
+For distribution, sign and notarize the binary manually:
 
 ```bash
 # Sign the binary
