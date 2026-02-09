@@ -1,6 +1,6 @@
 # `asbmutil`
 
-Swift command‑line interface for [Apple School & Business Manager (AxM) API](https://developer.apple.com/documentation/apple-school-and-business-manager-api)
+Swift command‑line interface for [Apple School & Business Manager API](https://developer.apple.com/documentation/apple-school-and-business-manager-api)
 
 Get devices info and assign/unassign MDM servers in bulk.
 
@@ -13,9 +13,9 @@ Get devices info and assign/unassign MDM servers in bulk.
 * Paginated device fetch for large inventories
 * CSV file support for bulk operations
 * StrictConcurrency enabled
+* **NEW (API 1.5)**: MAC addresses support multiple values (array format) for devices with multiple network interfaces
 * **NEW (API 1.4)**: Wi-Fi, Bluetooth, and built-in Ethernet MAC addresses for macOS
 * **NEW (API 1.3)**: AppleCare coverage lookup for devices
-* **NEW**: Consolidated `get-devices-info` command: device attributes, AppleCare coverage, and assigned MDM in one call
 * **NEW (API 1.2)**: Wi-Fi and Bluetooth MAC addresses for iOS, iPadOS, tvOS, and visionOS
 
 ## Quick setup

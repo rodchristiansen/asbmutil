@@ -79,12 +79,12 @@ struct DeviceAttributes: Decodable, Encodable, Sendable {
     let imei: StringOrArray?                 // The device's IMEI (if available) - can be array for dual SIM
     let meid: StringOrArray?                 // The device's MEID (if available)
     
-    // MAC Address attributes (API 1.2 - iOS, iPadOS, tvOS, visionOS)
-    let wifiMacAddress: String?              // The device's Wi-Fi MAC address
-    let bluetoothMacAddress: String?         // The device's Bluetooth MAC address
+    // MAC Address attributes (API 1.2 - iOS, iPadOS, tvOS, visionOS; API 1.5 - can be arrays)
+    let wifiMacAddress: StringOrArray?       // The device's Wi-Fi MAC address(es)
+    let bluetoothMacAddress: StringOrArray?  // The device's Bluetooth MAC address(es)
     
-    // MAC Address attributes (API 1.4 - macOS specific)
-    let builtInEthernetMacAddress: String?   // The device's built-in Ethernet MAC address (macOS only)
+    // MAC Address attributes (API 1.4 - macOS specific; API 1.5 - can be arrays)
+    let builtInEthernetMacAddress: StringOrArray?  // The device's built-in Ethernet MAC address(es)
     
     // Order and purchase information
     let orderDateTime: String?               // The date and time of placing the device's order
