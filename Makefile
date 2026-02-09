@@ -7,11 +7,16 @@ BINARY_PATH = $(BUILD_DIR)/$(BINARY_NAME)
 ZIP_FILE = $(BINARY_NAME).zip
 INSTALL_PATH = /usr/local/bin/$(BINARY_NAME)
 
-# Code signing
-SIGNING_IDENTITY = "Developer ID Application: Emily Carr University of Art and Design (7TF6CSP83S)"
-TEAM_ID = 7TF6CSP83S
+# Load environment variables from .env if it exists
+-include .env
+export
+
+# Code signing - provide it via environment variables or command line
+# Example: make release SIGNING_IDENTITY="Developer ID Application: Your Name (TEAMID)" TEAM_ID=YOURTEAMID
+SIGNING_IDENTITY ?= $(APPLE_SIGNING_IDENTITY)
+TEAM_ID ?= $(APPLE_TEAM_ID)
 ENTITLEMENTS = entitlements.plist
-# Override with: make release NOTARY_PROFILE=your-profile-name
+NOTARY_PROFILE ?= $(APPLE_NOTARY_PROFILE)
 NOTARY_PROFILE ?= notarization_credentials
 
 # Colors
@@ -25,18 +30,29 @@ all: help
 help:
 	@echo "$(GREEN)asbmutil Build Targets:$(NC)"
 	@echo "  $(YELLOW)build$(NC)          - Build release binary"
-	@echo "  $(YELLOW)sign$(NC)           - Sign the binary"
-	@echo "  $(YELLOW)notarize$(NC)       - Submit for notarization"
+	@echo "  $(YELLOW)sign$(NC)           - Sign the binary (requires SIGNING_IDENTITY)"
+	@echo "  $(YELLOW)notarize$(NC)       - Submit for notarization (requires TEAM_ID)"
 	@echo "  $(YELLOW)install$(NC)        - Install to $(INSTALL_PATH)"
 	@echo "  $(YELLOW)release$(NC)        - Build, sign, notarize, and install"
 	@echo "  $(YELLOW)clean$(NC)          - Remove build artifacts"
 	@echo "  $(YELLOW)setup-notary$(NC)   - Instructions for notarization setup"
 	@echo ""
-	@echo "$(GREEN)Environment Variables:$(NC)"
-	@echo "  $(YELLOW)NOTARY_PROFILE$(NC) - Keychain profile name (default: AC_PASSWORD)"
-	@echo "                   Usage: make release NOTARY_PROFILE=my-profile"
+	@echo "$(GREEN)Required Environment Variables (set in .env or command line):$(NC)"
+	@echo "  $(YELLOW)SIGNING_IDENTITY$(NC) or $(YELLOW)APPLE_SIGNING_IDENTITY$(NC)"
+	@echo "    - Your Apple Developer ID certificate name"
+	@echo "    - Example: 'Developer ID Application: Your Name (TEAMID)'"
+	@echo "  $(YELLOW)TEAM_ID$(NC) or $(YELLOW)APPLE_TEAM_ID$(NC)"
+	@echo "    - Your Apple Developer Team ID"
+	@echo "  $(YELLOW)NOTARY_PROFILE$(NC) or $(YELLOW)APPLE_NOTARY_PROFILE$(NC)"
+	@echo "    - Keychain profile name (default: notarization_credentials)"
 	@echo ""
-	@echo "$(GREEN)Quick start:$(NC) make release"
+	@echo "$(GREEN)Setup:$(NC)"
+	@echo "  1. Copy .env.example to .env and fill in your values"
+	@echo "  2. Run: $(YELLOW)make setup-notary$(NC) to configure notarization"
+	@echo "  3. Run: $(YELLOW)make release$(NC) to build and install"
+	@echo ""
+	@echo "$(GREEN)Or use command line:$(NC)"
+	@echo "  make release SIGNING_IDENTITY='...' TEAM_ID=... NOTARY_PROFILE=..."
 
 build:
 	@echo "$(GREEN)Building $(BINARY_NAME)...$(NC)"
@@ -45,6 +61,12 @@ build:
 
 sign: build
 	@echo "$(GREEN)Signing binary...$(NC)"
+	@if [ -z "$(SIGNING_IDENTITY)" ]; then \
+		echo "$(RED)Error: SIGNING_IDENTITY not set!$(NC)"; \
+		echo "$(YELLOW)Set it via .env file or command line:$(NC)"; \
+		echo "  make sign SIGNING_IDENTITY='Developer ID Application: Your Name (TEAMID)'"; \
+		exit 1; \
+	fi
 	codesign --force --options runtime \
 		--sign $(SIGNING_IDENTITY) \
 		--entitlements $(ENTITLEMENTS) \
@@ -56,6 +78,12 @@ sign: build
 
 notarize: sign
 	@echo "$(GREEN)Creating zip for notarization...$(NC)"
+	@if [ -z "$(TEAM_ID)" ]; then \
+		echo "$(RED)Error: TEAM_ID not set!$(NC)"; \
+		echo "$(YELLOW)Set it via .env file or command line:$(NC)"; \
+		echo "  make notarize TEAM_ID=YOURTEAMID"; \
+		exit 1; \
+	fi
 	@rm -f $(ZIP_FILE)
 	ditto -c -k --keepParent $(BINARY_PATH) $(ZIP_FILE)
 	@echo "$(YELLOW)Submitting for notarization (this may take a few minutes)...$(NC)"

@@ -47,17 +47,41 @@ make clean          # Remove build artifacts
 make help           # Show all available targets
 ```
 
-**First-time setup for notarization:**
+**First-time setup for code signing and notarization:**
 
+1. Copy the environment template:
+```bash
+cp .env.example .env
+```
+
+2. Edit `.env` and fill in your Apple Developer credentials:
+```bash
+# Find your signing identity
+security find-identity -v -p codesigning
+
+# Then edit .env with your values:
+# APPLE_SIGNING_IDENTITY="Developer ID Application: Your Name (TEAM123456)"
+# APPLE_TEAM_ID=TEAM123456
+# APPLE_NOTARY_PROFILE=notarization_credentials
+```
+
+3. Set up notarization credentials:
 ```bash
 # Show setup instructions
 make setup-notary
 
 # Then follow the instructions to store your credentials
-xcrun notarytool store-credentials \
+xcrun notarytool store-credentials notarization_credentials \
   --apple-id YOUR_APPLE_ID \
-  --team-id 7TF6CSP83S \
-  AC_PASSWORD
+  --team-id YOUR_TEAM_ID
+```
+
+**Alternative:** You can also provide credentials via command line without using `.env`:
+```bash
+make release \
+  SIGNING_IDENTITY="Developer ID Application: Your Name (TEAMID)" \
+  TEAM_ID=TEAMID \
+  NOTARY_PROFILE=your-profile-name
 ```
 
 ### Save your Credentials to Keychain
