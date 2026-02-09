@@ -37,6 +37,9 @@ fastlane/screenshots/
 fastlane/test_output/
 fastlane/*.env
 
+# ── Environment variables ────────────────────────────────────────────
+.env
+
 # ── Playgrounds & previews ──────────────────────────────────────────
 timeline.xctimeline
 playground.xcworkspace
