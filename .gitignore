@@ -17,6 +17,7 @@ DerivedData/
 xcuserdata/
 
 # ── Swift Package Manager ────────────────────────────────────────────
+*.zip
 .build/
 .swiftpm/
 Packages/
