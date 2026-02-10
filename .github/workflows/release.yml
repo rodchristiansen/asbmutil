@@ -102,32 +102,9 @@ jobs:
         
         # Create release notes
         cat > release_notes.md << EOF
-        ## asbmutil ${VERSION}
-        
-        **Release Date:** $(date +'%B %d, %Y at %I:%M %p %Z')
-        **Platform:** macOS ARM64
-        
-        ### Changes
         ${COMMITS}
-        
-        ### Installation
-        
-        \`\`\`bash
-        # Download and install
-        curl -L https://github.com/rodchristiansen/asbmutil/releases/download/${VERSION}/asbmutil-${VERSION}-macos-arm64.zip -o asbmutil.zip
-        unzip asbmutil.zip
-        sudo mv asbmutil /usr/local/bin/
-        sudo chmod +x /usr/local/bin/asbmutil
-        \`\`\`
-        
-        ### Verify
-        
-        \`\`\`bash
-        asbmutil --version
-        \`\`\`
         EOF
         
-        # Set output for next step
         echo "notes_file=release_notes.md" >> $GITHUB_OUTPUT
         
     - name: Create Release
