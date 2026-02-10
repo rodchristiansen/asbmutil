@@ -25,6 +25,23 @@ jobs:
         swift --version
         echo "Swift is ready for build"
         
+    - name: Generate version number
+      id: version
+      run: |
+        VERSION=$(date -u +'%Y.%m.%d.%H%M')
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "Generated version: $VERSION"
+        
+        # Update Version.swift with the generated version
+        cat > Sources/asbmutil/Version.swift << EOF
+        // This file is auto-generated during build
+        // Do not edit manually - changes will be overwritten
+
+        enum AppVersion {
+            static let version = "$VERSION"
+        }
+        EOF
+        
     - name: Build binary
       run: |
         swift build -c release
@@ -32,24 +49,14 @@ jobs:
     - name: Verify binary
       run: |
         ls -la .build/release/asbmutil
+        .build/release/asbmutil --version
         .build/release/asbmutil --help
-        
-    - name: Generate version number
-      id: version
-      run: |
-        if [[ "${{ github.ref }}" == refs/tags/* ]]; then
-          VERSION=${GITHUB_REF#refs/tags/}
-        else
-          VERSION=$(date +'%Y.%m.%d')-$(echo ${{ github.sha }} | cut -c1-7)
-        fi
-        echo "version=$VERSION" >> $GITHUB_OUTPUT
-        echo "Generated version: $VERSION"
         
     - name: Check and create daily tag
       id: daily_tag
       if: github.event_name == 'push' && github.ref == 'refs/heads/main'
       run: |
-        DAILY_TAG=$(date +'%Y.%m.%d')
+        DAILY_TAG=${{ steps.version.outputs.version }}
         echo "daily_tag=$DAILY_TAG" >> $GITHUB_OUTPUT
         
         # Check if tag already exists
@@ -65,37 +72,24 @@ jobs:
           echo "should_release=true" >> $GITHUB_OUTPUT
         fi
         
-    - name: Set release version
-      id: release_version
-      run: |
-        if [[ "${{ github.ref }}" == refs/tags/* ]]; then
-          VERSION=${GITHUB_REF#refs/tags/}
-        elif [[ "${{ steps.daily_tag.outputs.daily_tag }}" != "" ]]; then
-          VERSION=${{ steps.daily_tag.outputs.daily_tag }}
-        else
-          VERSION=${{ steps.version.outputs.version }}
-        fi
-        echo "version=$VERSION" >> $GITHUB_OUTPUT
-        echo "Release version: $VERSION"
-        
     - name: Create release zip
       run: |
-        zip -j asbmutil-${{ steps.release_version.outputs.version }}.zip .build/release/asbmutil
+        zip -j asbmutil-${{ steps.version.outputs.version }}.zip .build/release/asbmutil
         
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
-        name: asbmutil-${{ steps.release_version.outputs.version }}
+        name: asbmutil-${{ steps.version.outputs.version }}
         path: |
           .build/release/asbmutil
-          asbmutil-${{ steps.release_version.outputs.version }}.zip
+          asbmutil-${{ steps.version.outputs.version }}.zip
         
     - name: Create Release
       if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/') || (github.ref == 'refs/heads/main' && steps.daily_tag.outputs.should_release == 'true'))
       uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || steps.daily_tag.outputs.daily_tag }}
-        files: asbmutil-${{ steps.release_version.outputs.version }}.zip
+        files: asbmutil-${{ steps.version.outputs.version }}.zip
         generate_release_notes: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
