@@ -28,7 +28,8 @@ jobs:
     - name: Generate version number
       id: version
       run: |
-        VERSION=$(date -u +'%Y.%m.%d.%H%M')
+        export TZ=America/Vancouver
+        VERSION=$(date +'%Y.%m.%d.%H%M')
         echo "version=$VERSION" >> $GITHUB_OUTPUT
         echo "Generated version: $VERSION"
         
