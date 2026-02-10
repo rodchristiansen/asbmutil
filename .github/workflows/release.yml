@@ -4,8 +4,6 @@ on:
   push:
     branches: [ main ]
     tags: [ 'v*' ]
-  pull_request:
-    branches: [ main ]
 
 permissions:
   contents: write
@@ -28,7 +26,8 @@ jobs:
     - name: Generate version number
       id: version
       run: |
-        VERSION=$(date -u +'%Y.%m.%d.%H%M')
+        export TZ=America/Vancouver
+        VERSION=$(date +'%Y.%m.%d.%H%M')
         echo "version=$VERSION" >> $GITHUB_OUTPUT
         echo "Generated version: $VERSION"
         
@@ -74,22 +73,44 @@ jobs:
         
     - name: Create release zip
       run: |
-        zip -j asbmutil-${{ steps.version.outputs.version }}.zip .build/release/asbmutil
+        zip -j asbmutil-${{ steps.version.outputs.version }}-macos-arm64.zip .build/release/asbmutil
         
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
-        name: asbmutil-${{ steps.version.outputs.version }}
+        name: asbmutil-${{ steps.version.outputs.version }}-macos-arm64
         path: |
           .build/release/asbmutil
-          asbmutil-${{ steps.version.outputs.version }}.zip
+          asbmutil-${{ steps.version.outputs.version }}-macos-arm64.zip
+        
+    - name: Generate release notes
+      if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/') || (github.ref == 'refs/heads/main' && steps.daily_tag.outputs.should_release == 'true'))
+      id: release_notes
+      run: |
+        VERSION="${{ steps.version.outputs.version }}"
+        
+        # Get commits since last tag
+        LAST_TAG=$(git tag --sort=-creatordate | grep -v "$VERSION" | head -n 1 || echo "")
+        
+        if [ -z "$LAST_TAG" ]; then
+          COMMITS=$(git log --pretty=format:"- %s (%h)" -10)
+        else
+          COMMITS=$(git log ${LAST_TAG}..HEAD --pretty=format:"- %s (%h)")
+        fi
+        
+        # Create release notes
+        cat > release_notes.md << EOF
+        ${COMMITS}
+        EOF
+        
+        echo "notes_file=release_notes.md" >> $GITHUB_OUTPUT
         
     - name: Create Release
       if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/') || (github.ref == 'refs/heads/main' && steps.daily_tag.outputs.should_release == 'true'))
       uses: softprops/action-gh-release@v2
-      with:
-        tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || steps.daily_tag.outputs.daily_tag }}
-        files: asbmutil-${{ steps.version.outputs.version }}.zip
-        generate_release_notes: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || steps.daily_tag.outputs.daily_tag }}
+        body_path: release_notes.md
+        files: asbmutil-${{ steps.version.outputs.version }}-macos-arm64.zip
