@@ -75,22 +75,67 @@ jobs:
         
     - name: Create release zip
       run: |
-        zip -j asbmutil-${{ steps.version.outputs.version }}.zip .build/release/asbmutil
+        zip -j asbmutil-${{ steps.version.outputs.version }}-macos-arm64.zip .build/release/asbmutil
         
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
-        name: asbmutil-${{ steps.version.outputs.version }}
+        name: asbmutil-${{ steps.version.outputs.version }}-macos-arm64
         path: |
           .build/release/asbmutil
-          asbmutil-${{ steps.version.outputs.version }}.zip
+          asbmutil-${{ steps.version.outputs.version }}-macos-arm64.zip
+        
+    - name: Generate release notes
+      if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/') || (github.ref == 'refs/heads/main' && steps.daily_tag.outputs.should_release == 'true'))
+      id: release_notes
+      run: |
+        VERSION="${{ steps.version.outputs.version }}"
+        
+        # Get commits since last tag
+        LAST_TAG=$(git tag --sort=-creatordate | grep -v "$VERSION" | head -n 1 || echo "")
+        
+        if [ -z "$LAST_TAG" ]; then
+          COMMITS=$(git log --pretty=format:"- %s (%h)" -10)
+        else
+          COMMITS=$(git log ${LAST_TAG}..HEAD --pretty=format:"- %s (%h)")
+        fi
+        
+        # Create release notes
+        cat > release_notes.md << EOF
+        ## asbmutil ${VERSION}
+        
+        **Release Date:** $(date +'%B %d, %Y at %I:%M %p %Z')
+        **Platform:** macOS ARM64
+        
+        ### Changes
+        ${COMMITS}
+        
+        ### Installation
+        
+        \`\`\`bash
+        # Download and install
+        curl -L https://github.com/rodchristiansen/asbmutil/releases/download/${VERSION}/asbmutil-${VERSION}-macos-arm64.zip -o asbmutil.zip
+        unzip asbmutil.zip
+        sudo mv asbmutil /usr/local/bin/
+        sudo chmod +x /usr/local/bin/asbmutil
+        \`\`\`
+        
+        ### Verify
+        
+        \`\`\`bash
+        asbmutil --version
+        \`\`\`
+        EOF
+        
+        # Set output for next step
+        echo "notes_file=release_notes.md" >> $GITHUB_OUTPUT
         
     - name: Create Release
       if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/') || (github.ref == 'refs/heads/main' && steps.daily_tag.outputs.should_release == 'true'))
       uses: softprops/action-gh-release@v2
-      with:
-        tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || steps.daily_tag.outputs.daily_tag }}
-        files: asbmutil-${{ steps.version.outputs.version }}.zip
-        generate_release_notes: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || steps.daily_tag.outputs.daily_tag }}
+        body_path: release_notes.md
+        files: asbmutil-${{ steps.version.outputs.version }}-macos-arm64.zip
