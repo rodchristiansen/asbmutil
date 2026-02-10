@@ -6,6 +6,10 @@ BUILD_DIR = .build/release
 BINARY_PATH = $(BUILD_DIR)/$(BINARY_NAME)
 ZIP_FILE = $(BINARY_NAME).zip
 INSTALL_PATH = /usr/local/bin/$(BINARY_NAME)
+VERSION_FILE = Sources/asbmutil/Version.swift
+
+# Generate version in YYYY.MM.DD.HHMM format
+VERSION := $(shell date +'%Y.%m.%d.%H%M')
 
 # Load environment variables from .env if it exists
 -include .env
@@ -55,7 +59,14 @@ help:
 	@echo "  make release SIGNING_IDENTITY='...' TEAM_ID=... NOTARY_PROFILE=..."
 
 build:
-	@echo "$(GREEN)Building $(BINARY_NAME)...$(NC)"
+	@echo "$(GREEN)Generating version $(VERSION)...$(NC)"
+	@echo "// This file is auto-generated during build" > $(VERSION_FILE)
+	@echo "// Do not edit manually - changes will be overwritten" >> $(VERSION_FILE)
+	@echo "" >> $(VERSION_FILE)
+	@echo "enum AppVersion {" >> $(VERSION_FILE)
+	@echo "    static let version = \"$(VERSION)\"" >> $(VERSION_FILE)
+	@echo "}" >> $(VERSION_FILE)
+	@echo "$(GREEN)Building $(BINARY_NAME) version $(VERSION)...$(NC)"
 	swift build -c release
 	@echo "$(GREEN)✓ Build complete$(NC)"
 

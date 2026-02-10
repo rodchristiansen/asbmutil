@@ -4,7 +4,8 @@ import ArgumentParser
 struct ASBMUtil: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "asbmutil",
-        abstract: "Apple School & Business Manager CLI",
+        abstract: "Apple School & Business Manager CLI \(AppVersion.version)",
+        version: AppVersion.version,
         subcommands: [
             Config.self,
             ListDevices.self,
