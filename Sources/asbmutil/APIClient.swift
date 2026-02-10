@@ -501,7 +501,7 @@ actor APIClient {
         let claims: [String: Any] = [
             "iss": c.clientId,
             "sub": c.clientId,
-            "aud": "https://account.apple.com/auth/oauth2/v2/token",
+            "aud": "https://account.apple.com/auth/oauth2/token",
             "iat": now,
             "exp": now + 1_200,
             "jti": UUID().uuidString
