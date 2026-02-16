@@ -80,7 +80,10 @@ struct Assign: AsyncParsableCommand {
         
         let serialNumbers: [String]
         if let serials = serials {
-            serialNumbers = serials.split(separator: ",").map(String.init)
+            serialNumbers = serials
+                .split(separator: ",")
+                .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
         } else if let csvFile = csvFile {
             serialNumbers = try readSerialsFromCSV(filePath: csvFile)
         } else {
@@ -125,7 +128,10 @@ struct Unassign: AsyncParsableCommand {
         
         let serialNumbers: [String]
         if let serials = serials {
-            serialNumbers = serials.split(separator: ",").map(String.init)
+            serialNumbers = serials
+                .split(separator: ",")
+                .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
         } else if let csvFile = csvFile {
             serialNumbers = try readSerialsFromCSV(filePath: csvFile)
         } else {
