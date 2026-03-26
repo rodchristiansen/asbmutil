@@ -7,110 +7,170 @@ on:
 
 permissions:
   contents: write
-  
+
 jobs:
-  build:
-    runs-on: macos-14
-    
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      should_release: ${{ steps.tag.outputs.should_release }}
+      tag_name: ${{ steps.tag.outputs.tag_name }}
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-      
-    - name: Select Xcode with Swift 6+
-      run: |
-        # Use Xcode 16.1+ which includes Swift 6
-        sudo xcode-select -s /Applications/Xcode_16.1.app
-        swift --version
-        echo "Swift is ready for build"
-        
+      with:
+        fetch-depth: 0
+
     - name: Generate version number
       id: version
       run: |
         export TZ=America/Vancouver
         VERSION=$(date +'%Y.%m.%d.%H%M')
         echo "version=$VERSION" >> $GITHUB_OUTPUT
-        echo "Generated version: $VERSION"
-        
-        # Update Version.swift with the generated version
+
+    - name: Resolve tag
+      id: tag
+      run: |
+        if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+          echo "tag_name=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          echo "should_release=true" >> $GITHUB_OUTPUT
+        elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+          TAG="${{ steps.version.outputs.version }}"
+          if git tag -l "$TAG" | grep -q "$TAG"; then
+            echo "Tag $TAG already exists, skipping release"
+            echo "should_release=false" >> $GITHUB_OUTPUT
+          else
+            git config user.name "GitHub Actions"
+            git config user.email "actions@github.com"
+            git tag "$TAG"
+            git push origin "$TAG"
+            echo "should_release=true" >> $GITHUB_OUTPUT
+          fi
+          echo "tag_name=$TAG" >> $GITHUB_OUTPUT
+        else
+          echo "should_release=false" >> $GITHUB_OUTPUT
+          echo "tag_name=" >> $GITHUB_OUTPUT
+        fi
+
+  build-macos:
+    needs: version
+    runs-on: macos-14
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Select Xcode with Swift 6+
+      run: |
+        sudo xcode-select -s /Applications/Xcode_16.1.app
+        swift --version
+
+    - name: Write Version.swift
+      run: |
         cat > Sources/asbmutil/Version.swift << EOF
         // This file is auto-generated during build
         // Do not edit manually - changes will be overwritten
 
         enum AppVersion {
-            static let version = "$VERSION"
+            static let version = "${{ needs.version.outputs.version }}"
         }
         EOF
-        
+
     - name: Build binary
-      run: |
-        swift build -c release
-        
+      run: swift build -c release
+
     - name: Verify binary
       run: |
         ls -la .build/release/asbmutil
         .build/release/asbmutil --version
         .build/release/asbmutil --help
-        
-    - name: Check and create daily tag
-      id: daily_tag
-      if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-      run: |
-        DAILY_TAG=${{ steps.version.outputs.version }}
-        echo "daily_tag=$DAILY_TAG" >> $GITHUB_OUTPUT
-        
-        # Check if tag already exists
-        if git tag -l "$DAILY_TAG" | grep -q "$DAILY_TAG"; then
-          echo "Tag $DAILY_TAG already exists, skipping"
-          echo "should_release=false" >> $GITHUB_OUTPUT
-        else
-          echo "Creating new tag $DAILY_TAG"
-          git config user.name "GitHub Actions"
-          git config user.email "actions@github.com"
-          git tag "$DAILY_TAG"
-          git push origin "$DAILY_TAG"
-          echo "should_release=true" >> $GITHUB_OUTPUT
-        fi
-        
+
     - name: Create release zip
       run: |
-        zip -j asbmutil-${{ steps.version.outputs.version }}-macos-arm64.zip .build/release/asbmutil
-        
+        zip -j asbmutil-${{ needs.version.outputs.version }}-macos-arm64.zip .build/release/asbmutil
+
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
-        name: asbmutil-${{ steps.version.outputs.version }}-macos-arm64
-        path: |
-          .build/release/asbmutil
-          asbmutil-${{ steps.version.outputs.version }}-macos-arm64.zip
-        
-    - name: Generate release notes
-      if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/') || (github.ref == 'refs/heads/main' && steps.daily_tag.outputs.should_release == 'true'))
-      id: release_notes
+        name: asbmutil-${{ needs.version.outputs.version }}-macos-arm64
+        path: asbmutil-${{ needs.version.outputs.version }}-macos-arm64.zip
+
+  build-linux:
+    needs: version
+    runs-on: ubuntu-latest
+    container:
+      image: swift:6.0
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Write Version.swift
       run: |
-        VERSION="${{ steps.version.outputs.version }}"
-        
-        # Get commits since last tag
-        LAST_TAG=$(git tag --sort=-creatordate | grep -v "$VERSION" | head -n 1 || echo "")
-        
+        cat > Sources/asbmutil/Version.swift << EOF
+        // This file is auto-generated during build
+        // Do not edit manually - changes will be overwritten
+
+        enum AppVersion {
+            static let version = "${{ needs.version.outputs.version }}"
+        }
+        EOF
+
+    - name: Build binary
+      run: swift build -c release
+
+    - name: Verify binary
+      run: |
+        ls -la .build/release/asbmutil
+        .build/release/asbmutil --version
+        .build/release/asbmutil --help
+
+    - name: Create release archive
+      run: |
+        tar czf asbmutil-${{ needs.version.outputs.version }}-linux-amd64.tar.gz -C .build/release asbmutil
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: asbmutil-${{ needs.version.outputs.version }}-linux-amd64
+        path: asbmutil-${{ needs.version.outputs.version }}-linux-amd64.tar.gz
+
+  release:
+    needs: [version, build-macos, build-linux]
+    if: needs.version.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+
+    - name: Generate release notes
+      id: notes
+      run: |
+        TAG="${{ needs.version.outputs.tag_name }}"
+        LAST_TAG=$(git tag --sort=-creatordate | grep -v "$TAG" | head -n 1 || echo "")
+
         if [ -z "$LAST_TAG" ]; then
           COMMITS=$(git log --pretty=format:"- %s (%h)" -10)
         else
           COMMITS=$(git log ${LAST_TAG}..HEAD --pretty=format:"- %s (%h)")
         fi
-        
-        # Create release notes
+
         cat > release_notes.md << EOF
         ${COMMITS}
         EOF
-        
-        echo "notes_file=release_notes.md" >> $GITHUB_OUTPUT
-        
+
     - name: Create Release
-      if: github.event_name == 'push' && (startsWith(github.ref, 'refs/tags/') || (github.ref == 'refs/heads/main' && steps.daily_tag.outputs.should_release == 'true'))
       uses: softprops/action-gh-release@v2
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || steps.daily_tag.outputs.daily_tag }}
+        tag_name: ${{ needs.version.outputs.tag_name }}
         body_path: release_notes.md
-        files: asbmutil-${{ steps.version.outputs.version }}-macos-arm64.zip
+        files: |
+          artifacts/asbmutil-${{ needs.version.outputs.version }}-macos-arm64/asbmutil-${{ needs.version.outputs.version }}-macos-arm64.zip
+          artifacts/asbmutil-${{ needs.version.outputs.version }}-linux-amd64/asbmutil-${{ needs.version.outputs.version }}-linux-amd64.tar.gz
