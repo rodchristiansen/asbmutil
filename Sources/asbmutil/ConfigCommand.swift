@@ -1,10 +1,12 @@
 import ArgumentParser
+#if canImport(Security)
 import Security
+#endif
 import Foundation
 
 struct Config: ParsableCommand {
     static let configuration = CommandConfiguration(
-        abstract: "Store AxM credentials in macOS Keychain",
+        abstract: "Store AxM credentials in the system credential store",
         subcommands: [Set.self, Show.self, Clear.self, ListProfiles.self, SetProfile.self, ShowProfile.self]
     )
 
@@ -18,8 +20,8 @@ struct Config: ParsableCommand {
         func run() throws {
             let pem = try String(contentsOfFile: pemPath)
             let blob = KCBlob(clientId: clientId, keyId: keyId, privateKey: pem, teamId: "")
-            guard Keychain.saveBlob(blob, profileName: profileName) == errSecSuccess else {
-                throw RuntimeError("keychain write failed")
+            guard Keychain.saveBlob(blob, profileName: profileName) == 0 else {
+                throw RuntimeError("credential store write failed")
             }
             
             // Set as current profile if it's the first one or explicitly requested
@@ -50,7 +52,7 @@ struct Config: ParsableCommand {
 
     struct Clear: ParsableCommand {
         static let configuration = CommandConfiguration(
-            abstract: "Remove stored credentials from macOS Keychain"
+            abstract: "Remove stored credentials"
         )
         
         @Option(name: .customLong("profile"), help: "Profile name to clear (default: all profiles)")
@@ -59,13 +61,10 @@ struct Config: ParsableCommand {
         func run() throws {
             if let profileName = profileName {
                 let status = Keychain.deleteBlob(profileName: profileName)
-                switch status {
-                case errSecSuccess:
+                if status == 0 {
                     print("credentials cleared for profile '\(profileName)'")
-                case errSecItemNotFound:
+                } else {
                     print("no credentials found for profile '\(profileName)'")
-                default:
-                    throw RuntimeError("keychain delete failed with status: \(status)")
                 }
             } else {
                 // Clear all profiles
@@ -75,12 +74,7 @@ struct Config: ParsableCommand {
                 }
                 
                 // Clear current profile setting
-                let q: [String:Any] = [
-                    kSecClass as String:       kSecClassGenericPassword,
-                    kSecAttrService as String: Keychain.service,
-                    kSecAttrAccount as String: Keychain.currentProfileKey
-                ]
-                SecItemDelete(q as CFDictionary)
+                Keychain.clearCurrentProfileEntry()
                 
                 print("cleared all profiles")
             }
@@ -127,7 +121,7 @@ struct Config: ParsableCommand {
                 throw RuntimeError("profile '\(profileName)' not found. Available profiles: \(profiles.map(\.name).joined(separator: ", "))")
             }
             
-            guard Keychain.setCurrentProfile(profileName) == errSecSuccess else {
+            guard Keychain.setCurrentProfile(profileName) == 0 else {
                 throw RuntimeError("failed to set current profile")
             }
             

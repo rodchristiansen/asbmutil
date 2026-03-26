@@ -1,5 +1,12 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
+#if canImport(CryptoKit)
 import CryptoKit
+#elseif canImport(Crypto)
+import Crypto
+#endif
 
 // --- disable system proxy for all requests ---
 private let plainSession: URLSession = {
@@ -532,7 +539,11 @@ actor APIClient {
     }
 }
 
+#if canImport(CryptoKit)
 import CryptoKit
+#elseif canImport(Crypto)
+import Crypto
+#endif
 import Foundation
 
 private func makeKey(from pem: String) throws -> P256.Signing.PrivateKey {
