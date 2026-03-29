@@ -9,6 +9,7 @@ struct ASBMUtil: AsyncParsableCommand {
         subcommands: [
             Config.self,
             ListDevices.self,
+            ListDevicesServers.self,
             ListMdmServers.self,
             GetDevicesInfo.self,
             Assign.self,

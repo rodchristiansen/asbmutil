@@ -231,8 +231,35 @@ actor APIClient {
         }
     }
 
-    func getAssignedMdm(deviceId: String) async throws -> EnhancedAssignedServerResponse {
-        let response: AssignedServerResponse = try await send(
+    /// Fetch all device serial numbers assigned to an MDM server (paginated).
+    /// Uses GET /v1/mdmServers/{id}/relationships/devices?limit=1000.
+    func listMdmServerDevices(serverId: String) async throws -> [String] {
+        var serials: [String] = []
+        var nextURL: String? = Endpoints.mdmServerDevices(serverId).path + "?limit=1000"
+        var page = 0
+        let maxPages = 50
+
+        while let urlPath = nextURL, page < maxPages {
+            let response: MdmServerDevicesResponse = try await send(
+                Request(
+                    method: .GET,
+                    path: urlPath,
+                    scope: creds.scope,
+                    body: nil
+                )
+            )
+            serials += response.data.map(\.id)
+            nextURL = response.links?.next
+            page += 1
+        }
+
+        return serials
+    }
+
+    /// Raw MDM relationship query -- returns only server ID, no name resolution.
+    /// Use this for bulk queries where the caller resolves names via a pre-fetched server map.
+    func getAssignedMdmRaw(deviceId: String) async throws -> AssignedServerResponse {
+        return try await send(
             Request(
                 method: .GET,
                 path: "/v1/orgDevices/\(deviceId)/relationships/assignedServer",
@@ -240,6 +267,10 @@ actor APIClient {
                 body: nil
             )
         )
+    }
+
+    func getAssignedMdm(deviceId: String) async throws -> EnhancedAssignedServerResponse {
+        let response = try await getAssignedMdmRaw(deviceId: deviceId)
         
         // If there's no assigned server, return the basic response
         guard let assignedData = response.data else {
@@ -482,7 +513,7 @@ actor APIClient {
             .joined(separator: "&")
 
         var components = URLComponents(
-            string: "https://account.apple.com/auth/oauth2/token"
+            string: "https://account.apple.com/auth/oauth2/v2/token"
         )!
         components.percentEncodedQuery = query
 
@@ -508,7 +539,7 @@ actor APIClient {
         let claims: [String: Any] = [
             "iss": c.clientId,
             "sub": c.clientId,
-            "aud": "https://account.apple.com/auth/oauth2/token",
+            "aud": "https://account.apple.com/auth/oauth2/v2/token",
             "iat": now,
             "exp": now + 1_200,
             "jti": UUID().uuidString
