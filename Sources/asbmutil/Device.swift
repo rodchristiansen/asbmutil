@@ -162,6 +162,23 @@ struct MdmServerWithId: Decodable, Encodable, Sendable {
     let updatedDateTime: String?
 }
 
+// MARK: - MDM Server Device Relationships
+
+struct MdmServerDevicesResponse: Decodable, Sendable {
+    let data: [MdmServerDeviceRef]
+    let links: MdmServerDevicesLinks?
+}
+
+struct MdmServerDeviceRef: Decodable, Sendable {
+    let type: String
+    let id: String          // serial number
+}
+
+struct MdmServerDevicesLinks: Decodable, Sendable {
+    let `self`: String?
+    let next: String?
+}
+
 // MARK: - AppleCare Coverage (API 1.3)
 
 struct AppleCareResponse: Decodable, Sendable {

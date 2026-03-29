@@ -6,7 +6,7 @@ import Foundation
 
 struct Config: ParsableCommand {
     static let configuration = CommandConfiguration(
-        abstract: "Store AxM credentials in the system credential store",
+        abstract: "Store credentials in the system credential store",
         subcommands: [Set.self, Show.self, Clear.self, ListProfiles.self, SetProfile.self, ShowProfile.self]
     )
 

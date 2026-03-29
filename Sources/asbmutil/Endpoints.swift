@@ -15,6 +15,7 @@ enum Endpoints {
     case orgDeviceActivities
     case orgDeviceActivity(String)
     case mdmServers
+    case mdmServerDevices(String)        // v1 devices assigned to an MDM server
     case appleCare(String)               // API 1.3: AppleCare coverage for a device
 
     var path: String {
@@ -23,6 +24,7 @@ enum Endpoints {
         case .orgDeviceActivities: return "/v1/orgDeviceActivities"
         case .orgDeviceActivity(let id): return "/v1/orgDeviceActivities/\(id)"
         case .mdmServers: return "/v1/mdmServers"
+        case .mdmServerDevices(let id): return "/v1/mdmServers/\(id)/relationships/devices"
         case .appleCare(let deviceId): return "/v1/orgDevices/\(deviceId)/appleCareCoverage"
         }
     }

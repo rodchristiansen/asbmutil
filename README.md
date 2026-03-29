@@ -2,7 +2,7 @@
 
 Swift command‑line interface for [Apple School & Business Manager API](https://developer.apple.com/documentation/apple-school-and-business-manager-api)
 
-Get devices info and assign/unassign MDM servers in bulk.
+Get devices info, assign/unassign MDM servers, and resolve device-to-server assignments across your fleet.
 
 ## Features
 
@@ -13,6 +13,7 @@ Get devices info and assign/unassign MDM servers in bulk.
 * Paginated device fetch for large inventories
 * CSV file support for bulk operations
 * StrictConcurrency enabled
+* Bulk device-to-server resolution via server-side device listing (4-5 API calls regardless of fleet size)
 * **NEW (API 1.5)**: MAC addresses support multiple values (array format) for devices with multiple network interfaces
 * **NEW (API 1.4)**: Wi-Fi, Bluetooth, and built-in Ethernet MAC addresses for macOS
 * **NEW (API 1.3)**: AppleCare coverage lookup for devices
@@ -144,6 +145,11 @@ For organizations managing multiple ABM instances, you can create named profiles
 
 # MDM Server Operations
 ./asbmutil list-mdm-servers
+./asbmutil list-devices-servers --mdm "MicroMDM"         # Devices assigned to a named MDM server
+./asbmutil list-devices-servers --server-id A47B2E83F9  # Devices assigned to a server by ID
+./asbmutil list-devices-servers --all                    # Devices for all MDM servers
+./asbmutil list-devices-servers --serials P8R2K47NF5X9,Q7M5V83WH4L2  # Look up MDM for specific devices
+./asbmutil list-devices-servers --csv-file devices.csv  # Look up MDM from CSV
 
 # Get Device Info (device attributes + AppleCare + assigned MDM)
 ./asbmutil get-devices-info --serials P8R2K47NF5X9
@@ -438,6 +444,67 @@ Use `--mdm` to output only assigned MDM info:
 }
 ```
 
+### List Devices Servers
+
+Query device-to-server assignments in two directions:
+
+**Which devices are on a server?** Use `--mdm`, `--server-id`, or `--all`:
+
+```bash
+./asbmutil list-devices-servers --mdm "MicroMDM" | jq
+
+[
+  {
+    "serverId": "C5E8B39F4A7D4E2C8931F6D4A2B8E5F7",
+    "serverName": "MicroMDM",
+    "serverType": "MDM",
+    "deviceCount": 727,
+    "devices": [
+      "P8R2K47NF5X9",
+      "Z9B4C72HXFW5",
+      "M4L8D63JKV7Q"
+    ]
+  }
+]
+```
+
+**Which server is each device on?** Use `--serials` or `--csv-file`:
+
+```bash
+./asbmutil list-devices-servers --serials P8R2K47NF5X9,Q7M5V83WH4L2,NOTREAL123 | jq
+
+Fetched 4 MDM servers
+  Devices Added by Apple Configurator 2: 1 devices
+  Intune: 62 devices
+  MicroMDM: 727 devices
+  SimpleMDM: 10 devices
+[
+  {
+    "serialNumber": "P8R2K47NF5X9",
+    "assignedMdm": {
+      "id": "C5E8B39F4A7D4E2C8931F6D4A2B8E5F7",
+      "serverName": "MicroMDM",
+      "serverType": "MDM"
+    }
+  },
+  {
+    "serialNumber": "Q7M5V83WH4L2",
+    "assignedMdm": {
+      "id": "B92F7A64E81C4D3F9067C2B5E8F43A71",
+      "serverName": "Intune",
+      "serverType": "MDM"
+    }
+  },
+  {
+    "serialNumber": "NOTREAL123",
+    "assignedMdm": null
+  }
+]
+Done: 2/3 devices have MDM assignments
+```
+
+Both modes use efficient server-side device listing (4-5 API calls regardless of device count).
+
 ### Assign Devices
 
 ```bash
@@ -462,7 +529,7 @@ Use `--mdm` to output only assigned MDM info:
 ## Requirements
 
 * macOS 14 or newer  
-* Xcode 16 beta (Swift 6 toolchain)  
+* Xcode 16 or newer (Swift 6 toolchain)  
 * AxM API Account
 
 ## Code Signing & Notarization
