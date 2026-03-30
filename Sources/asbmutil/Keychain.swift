@@ -157,7 +157,31 @@ enum Keychain {
         SecItemAdd(q as CFDictionary, nil)
     }
 
-    // MARK: - Token Cache
+    // MARK: - Token Cache (with file fallback for CI/headless)
+
+    private static var tokenCacheDir: URL {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        return home.appendingPathComponent(".config/asbmutil")
+    }
+
+    private static func tokenFilePath(profileName: String) -> URL {
+        tokenCacheDir.appendingPathComponent("SBM_TOKEN_\(profileName).json")
+    }
+
+    private static func saveTokenToFile(_ token: Token, profileName: String) {
+        let dir = tokenCacheDir
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dir.path)
+        let data = try! JSONEncoder().encode(token)
+        let url = tokenFilePath(profileName: profileName)
+        try? data.write(to: url, options: .atomic)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+    }
+
+    private static func loadTokenFromFile(profileName: String) -> Token? {
+        guard let data = try? Data(contentsOf: tokenFilePath(profileName: profileName)) else { return nil }
+        return try? JSONDecoder().decode(Token.self, from: data)
+    }
 
     @discardableResult
     static func saveToken(_ token: Token, profileName: String = "default") -> OSStatus {
@@ -169,7 +193,12 @@ enum Keychain {
         SecItemDelete(q as CFDictionary)
 
         q[kSecValueData as String] = data
-        return SecItemAdd(q as CFDictionary, nil)
+        let status = SecItemAdd(q as CFDictionary, nil)
+        if status != errSecSuccess {
+            // Keychain failed (CI, headless, sandbox) -- fall back to file
+            saveTokenToFile(token, profileName: profileName)
+        }
+        return status
     }
 
     static func loadToken(profileName: String = "default") -> Token? {
@@ -180,10 +209,12 @@ enum Keychain {
 
         var out: AnyObject?
         if SecItemCopyMatching(q as CFDictionary, &out) == errSecSuccess,
-           let d = out as? Data {
-            return try? JSONDecoder().decode(Token.self, from: d)
+           let d = out as? Data,
+           let t = try? JSONDecoder().decode(Token.self, from: d) {
+            return t
         }
-        return nil
+        // Fall back to file-based cache
+        return loadTokenFromFile(profileName: profileName)
     }
 
     @discardableResult

@@ -154,12 +154,37 @@ struct BatchStatus: AsyncParsableCommand {
     )
     @Argument var id: String
 
+    @Flag(name: .customLong("poll"), help: "Poll until the activity completes or times out")
+    var poll: Bool = false
+
+    @Option(name: .customLong("interval"), help: "Seconds between polls (default: 10)")
+    var interval: Int = 10
+
+    @Option(name: .customLong("timeout"), help: "Max seconds to poll before giving up (default: 240)")
+    var timeout: Int = 240
+
     @Option(name: .customLong("profile"), help: "Profile name to use for credentials")
     var profileName: String?
 
     func run() async throws {
         let client = try await APIClient(credentials: Creds.load(profileName: profileName), profileName: profileName)
-        print(try await client.activityStatus(id: id))
+
+        if poll {
+            let deadline = Date().addingTimeInterval(TimeInterval(timeout))
+            var finalStatus = "TIMEOUT"
+            while Date() < deadline {
+                let status = try await client.activityStatus(id: id)
+                FileHandle.standardError.write(Data("poll: \(status)\n".utf8))
+                if status == "COMPLETE" || status == "COMPLETED" || status == "FAILED" || status == "ERROR" {
+                    finalStatus = status
+                    break
+                }
+                try await Task.sleep(nanoseconds: UInt64(interval) * 1_000_000_000)
+            }
+            print(finalStatus)
+        } else {
+            print(try await client.activityStatus(id: id))
+        }
     }
 }
 
