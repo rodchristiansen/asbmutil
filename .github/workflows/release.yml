@@ -114,13 +114,21 @@ jobs:
         }
         EOF
 
+    - name: Install Static Linux SDK
+      run: |
+        SWIFT_VERSION=$(swift --version | sed -n 's/.*Swift version \([0-9.]*\).*/\1/p')
+        echo "Detected Swift version: ${SWIFT_VERSION}"
+        swift sdk install "https://download.swift.org/swift-${SWIFT_VERSION}-release/static-sdk/swift-${SWIFT_VERSION}-RELEASE/swift-${SWIFT_VERSION}-RELEASE_static-linux-0.0.1.artifactbundle.tar.gz"
+        swift sdk list
+
     - name: Build binary
-      run: swift build -c release --static-swift-stdlib
+      run: swift build -c release --swift-sdk x86_64-swift-linux-musl
 
     - name: Verify binary
       run: |
         ls -la .build/release/asbmutil
-        ldd .build/release/asbmutil || true
+        file .build/release/asbmutil
+        ldd .build/release/asbmutil && echo "WARNING: dynamically linked" || echo "Fully statically linked"
         .build/release/asbmutil --version
         .build/release/asbmutil --help
 
