@@ -98,7 +98,7 @@ jobs:
     needs: version
     runs-on: ubuntu-latest
     container:
-      image: swift:6.0
+      image: swift:6.0-focal
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -114,26 +114,14 @@ jobs:
         }
         EOF
 
-    - name: Install Static Linux SDK
-      run: |
-        apt-get update -qq && apt-get install -y -qq curl > /dev/null 2>&1
-        SWIFT_VERSION=$(swift --version | sed -n 's/.*Swift version \([0-9.]*\).*/\1/p')
-        echo "Detected Swift version: ${SWIFT_VERSION}"
-        SDK_URL="https://download.swift.org/swift-${SWIFT_VERSION}-release/static-sdk/swift-${SWIFT_VERSION}-RELEASE/swift-${SWIFT_VERSION}-RELEASE_static-linux-0.0.1.artifactbundle.tar.gz"
-        echo "Downloading SDK from: ${SDK_URL}"
-        curl -sL -o /tmp/static-linux-sdk.tar.gz "${SDK_URL}"
-        swift sdk install /tmp/static-linux-sdk.tar.gz
-        swift sdk list
-
     - name: Build binary
-      run: swift build -c release --swift-sdk x86_64-swift-linux-musl
+      run: swift build -c release
 
     - name: Verify binary
       run: |
         ls -la .build/release/asbmutil
-        ldd .build/release/asbmutil 2>&1 && echo "WARNING: dynamically linked" || echo "Fully statically linked (musl)"
+        ldd .build/release/asbmutil | grep GLIBC | sort -u || echo "No GLIBC deps"
         .build/release/asbmutil --version
-        .build/release/asbmutil --help
 
     - name: Create release archive
       run: |
