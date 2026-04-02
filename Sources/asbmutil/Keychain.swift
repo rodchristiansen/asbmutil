@@ -48,7 +48,13 @@ enum Keychain {
 
         q[kSecValueData as String] = data
         updateProfilesList(profileName: profileName, blob: blob)
-        return SecItemAdd(q as CFDictionary, nil)
+        let status = SecItemAdd(q as CFDictionary, nil)
+        if status != errSecSuccess {
+            // Keychain failed (CI, headless, sandbox) -- fall back to file
+            saveBlobToFile(blob, profileName: profileName)
+            return errSecSuccess
+        }
+        return status
     }
 
     static func loadBlob(profileName: String = "default") -> KCBlob? {
@@ -63,7 +69,11 @@ enum Keychain {
             return try? JSONDecoder().decode(KCBlob.self, from: d)
         }
         // Fall back to legacy keychain (migrates on next save)
-        return loadBlobLegacy(account: accountName)
+        if let blob = loadBlobLegacy(account: accountName) {
+            return blob
+        }
+        // Fall back to file-based cache
+        return loadBlobFromFile(profileName: profileName)
     }
 
     static func loadBlob() -> KCBlob? {
@@ -97,7 +107,8 @@ enum Keychain {
            let profiles = try? JSONDecoder().decode([ProfileInfo].self, from: d) {
             return profiles
         }
-        return []
+        // Fall back to file-based cache
+        return loadProfilesListFromFile() ?? []
     }
 
     static func getCurrentProfile() -> String {
@@ -116,7 +127,8 @@ enum Keychain {
            let name = String(data: d, encoding: .utf8) {
             return name
         }
-        return "default"
+        // Fall back to file-based cache
+        return loadCurrentProfileFromFile() ?? "default"
     }
 
     static func setCurrentProfile(_ profileName: String) -> OSStatus {
@@ -126,7 +138,12 @@ enum Keychain {
         SecItemDelete(q as CFDictionary)
 
         q[kSecValueData as String] = data
-        return SecItemAdd(q as CFDictionary, nil)
+        let status = SecItemAdd(q as CFDictionary, nil)
+        if status != errSecSuccess {
+            saveCurrentProfileToFile(profileName)
+            return errSecSuccess
+        }
+        return status
     }
 
     private static func updateProfilesList(profileName: String, blob: KCBlob) {
@@ -154,7 +171,10 @@ enum Keychain {
         SecItemDelete(q as CFDictionary)
 
         q[kSecValueData as String] = data
-        SecItemAdd(q as CFDictionary, nil)
+        let status = SecItemAdd(q as CFDictionary, nil)
+        if status != errSecSuccess {
+            saveProfilesListToFile(profiles)
+        }
     }
 
     // MARK: - Token Cache (with file fallback for CI/headless)
@@ -181,6 +201,57 @@ enum Keychain {
     private static func loadTokenFromFile(profileName: String) -> Token? {
         guard let data = try? Data(contentsOf: tokenFilePath(profileName: profileName)) else { return nil }
         return try? JSONDecoder().decode(Token.self, from: data)
+    }
+
+    // MARK: - File fallback helpers for credentials/profiles
+
+    private static func saveBlobToFile(_ blob: KCBlob, profileName: String) {
+        let dir = tokenCacheDir
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dir.path)
+        let data = try! JSONEncoder().encode(blob)
+        let url = dir.appendingPathComponent("SBM_CREDENTIALS_\(profileName).json")
+        try? data.write(to: url, options: .atomic)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+    }
+
+    private static func loadBlobFromFile(profileName: String) -> KCBlob? {
+        let url = tokenCacheDir.appendingPathComponent("SBM_CREDENTIALS_\(profileName).json")
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return try? JSONDecoder().decode(KCBlob.self, from: data)
+    }
+
+    private static func saveProfilesListToFile(_ profiles: [ProfileInfo]) {
+        let dir = tokenCacheDir
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dir.path)
+        let data = try! JSONEncoder().encode(profiles)
+        let url = dir.appendingPathComponent("\(profilesKey).json")
+        try? data.write(to: url, options: .atomic)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+    }
+
+    private static func loadProfilesListFromFile() -> [ProfileInfo]? {
+        let url = tokenCacheDir.appendingPathComponent("\(profilesKey).json")
+        guard let data = try? Data(contentsOf: url) else { return nil }
+        return try? JSONDecoder().decode([ProfileInfo].self, from: data)
+    }
+
+    private static func saveCurrentProfileToFile(_ profileName: String) {
+        let dir = tokenCacheDir
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dir.path)
+        let data = profileName.data(using: .utf8)!
+        let url = dir.appendingPathComponent("\(currentProfileKey).json")
+        try? data.write(to: url, options: .atomic)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+    }
+
+    private static func loadCurrentProfileFromFile() -> String? {
+        let url = tokenCacheDir.appendingPathComponent("\(currentProfileKey).json")
+        guard let data = try? Data(contentsOf: url),
+              let name = String(data: data, encoding: .utf8) else { return nil }
+        return name
     }
 
     @discardableResult
