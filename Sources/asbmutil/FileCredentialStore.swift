@@ -13,8 +13,13 @@ enum Keychain {
     // MARK: - Storage directory
 
     private static var configDir: URL {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        return home.appendingPathComponent(".config/asbmutil")
+        // On Linux with musl, FileManager.homeDirectoryForCurrentUser calls getpwuid()
+        // which returns the passwd home (e.g. /nonexistent for nobody), ignoring the
+        // HOME environment variable.  Prefer HOME so callers can control the path.
+        let homePath = ProcessInfo.processInfo.environment["HOME"]
+            ?? FileManager.default.homeDirectoryForCurrentUser.path
+        return URL(fileURLWithPath: homePath, isDirectory: true)
+            .appendingPathComponent(".config/asbmutil")
     }
 
     private static func ensureConfigDir() {
