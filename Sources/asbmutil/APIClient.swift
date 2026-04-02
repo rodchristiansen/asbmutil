@@ -394,7 +394,12 @@ actor APIClient {
         
         for attempt in 0...maxRetries {
             do {
-                let (data, resp) = try await session.data(for: urlReq)
+                let (data, resp): (Data, URLResponse) = try await withCheckedThrowingContinuation { cont in
+                    session.dataTask(with: urlReq) { d, r, err in
+                        if let err = err { cont.resume(throwing: err); return }
+                        cont.resume(returning: (d ?? Data(), r!))
+                    }.resume()
+                }
                 guard let http = resp as? HTTPURLResponse else {
                     throw RuntimeError("Invalid response type")
                 }
@@ -520,7 +525,16 @@ actor APIClient {
         let data: Data
         let resp: URLResponse
         do {
-            (data, resp) = try await session.data(for: req)
+            // Use callback-based dataTask wrapped in a continuation.
+            // On Linux/musl with the Swift Static SDK, the native async
+            // URLSession.data(for:) fails with NSURLErrorUnknown (-1) due to
+            // run-loop integration issues in swift-corelibs-foundation.
+            (data, resp) = try await withCheckedThrowingContinuation { cont in
+                session.dataTask(with: req) { d, r, err in
+                    if let err = err { cont.resume(throwing: err); return }
+                    cont.resume(returning: (d ?? Data(), r!))
+                }.resume()
+            }
         } catch {
             FileHandle.standardError.write(Data("[NET] URLSession error: \(error)\n".utf8))
             throw error
