@@ -8,18 +8,12 @@ import CryptoKit
 import Crypto
 #endif
 
-// --- disable system proxy for all requests ---
-private let plainSession: URLSession = {
-    let cfg = URLSessionConfiguration.default
-    cfg.connectionProxyDictionary = [:]      // ← disable auto-proxy / PAC
-    return URLSession(configuration: cfg)
-}()
-
 actor APIClient {
     private var token: Token
     private let creds: Credentials
     private let profileName: String
-    private let session: URLSession = plainSession  // use proxy-free session
+    // Defer session creation to avoid static-init ordering issues on Linux/musl.
+    private let session: URLSession = URLSession(configuration: .default)
     
     // Retry configuration
     private let maxRetries = 3
@@ -522,8 +516,17 @@ actor APIClient {
         req.setValue("application/x-www-form-urlencoded",
                      forHTTPHeaderField: "Content-Type")
 
-        let (data, resp) = try await session.data(for: req)
+        FileHandle.standardError.write(Data("[NET] POST \(req.url!.absoluteString.prefix(80))\n".utf8))
+        let data: Data
+        let resp: URLResponse
+        do {
+            (data, resp) = try await session.data(for: req)
+        } catch {
+            FileHandle.standardError.write(Data("[NET] URLSession error: \(error)\n".utf8))
+            throw error
+        }
         let http = resp as? HTTPURLResponse
+        FileHandle.standardError.write(Data("[NET] HTTP \(http?.statusCode ?? 0)\n".utf8))
         if http?.statusCode != 200 {
             FileHandle.standardError.write(Data("TOKEN-URL → \(req.url!.absoluteString)\n".utf8))
             FileHandle.standardError.write(data)   // Apple's JSON
