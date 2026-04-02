@@ -3,23 +3,44 @@ import PackageDescription
 
 let package = Package(
     name: "asbmutil",
-    platforms: [ .macOS(.v14) ],
+    platforms: [.macOS(.v14)],
     products: [
-        .executable(name: "asbmutil", targets: ["asbmutil"])
+        .executable(name: "asbmutil", targets: ["ASBMUtilCLI"]),
+        .executable(name: "ASBMUtilApp", targets: ["ASBMUtilApp"]),
+        .executable(name: "ASBMUtilHelper", targets: ["ASBMUtilHelper"]),
+        .library(name: "ASBMUtilCore", targets: ["ASBMUtilCore"]),
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser.git", from: "1.3.0"),
         .package(url: "https://github.com/apple/swift-crypto.git", from: "3.0.0"),
     ],
     targets: [
-        .executableTarget(
-            name: "asbmutil",
+        .target(
+            name: "ASBMUtilCore",
             dependencies: [
-                .product(name: "ArgumentParser", package: "swift-argument-parser"),
-                .product(name: "Crypto", package: "swift-crypto", condition: .when(platforms: [.linux])),
+                .product(name: "Crypto", package: "swift-crypto",
+                         condition: .when(platforms: [.linux])),
             ],
-            path: "Sources/asbmutil"
-        )
+            path: "Sources/core"
+        ),
+        .executableTarget(
+            name: "ASBMUtilCLI",
+            dependencies: [
+                "ASBMUtilCore",
+                .product(name: "ArgumentParser", package: "swift-argument-parser"),
+            ],
+            path: "Sources/cli"
+        ),
+        .executableTarget(
+            name: "ASBMUtilApp",
+            dependencies: ["ASBMUtilCore"],
+            path: "Sources/app"
+        ),
+        .executableTarget(
+            name: "ASBMUtilHelper",
+            dependencies: ["ASBMUtilCore"],
+            path: "Sources/helper"
+        ),
     ],
     swiftLanguageModes: [.v6]
 )

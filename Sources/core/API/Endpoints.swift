@@ -1,7 +1,7 @@
 import Foundation
 
-enum Endpoints {
-    static func base(for scope: String) -> URL {
+public enum Endpoints {
+    public static func base(for scope: String) -> URL {
         switch scope {
         case "business.api":
             return URL(string: "https://api-business.apple.com/")!
@@ -18,7 +18,7 @@ enum Endpoints {
     case mdmServerDevices(String)        // v1 devices assigned to an MDM server
     case appleCare(String)               // API 1.3: AppleCare coverage for a device
 
-    var path: String {
+    public var path: String {
         switch self {
         case .orgDevice(let serial): return "/v1/orgDevices/\(serial)"
         case .orgDeviceActivities: return "/v1/orgDeviceActivities"
