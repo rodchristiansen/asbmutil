@@ -116,6 +116,7 @@ jobs:
 
     - name: Install Static Linux SDK
       run: |
+        apt-get update -qq && apt-get install -y -qq curl > /dev/null 2>&1
         SWIFT_VERSION=$(swift --version | sed -n 's/.*Swift version \([0-9.]*\).*/\1/p')
         echo "Detected Swift version: ${SWIFT_VERSION}"
         SDK_URL="https://download.swift.org/swift-${SWIFT_VERSION}-release/static-sdk/swift-${SWIFT_VERSION}-RELEASE/swift-${SWIFT_VERSION}-RELEASE_static-linux-0.0.1.artifactbundle.tar.gz"
