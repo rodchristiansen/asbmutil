@@ -131,8 +131,7 @@ jobs:
     - name: Verify binary
       run: |
         ls -la .build/release/asbmutil
-        file .build/release/asbmutil
-        ldd .build/release/asbmutil && echo "WARNING: dynamically linked" || echo "Fully statically linked"
+        ldd .build/release/asbmutil 2>&1 && echo "WARNING: dynamically linked" || echo "Fully statically linked (musl)"
         .build/release/asbmutil --version
         .build/release/asbmutil --help
 
