@@ -115,12 +115,12 @@ jobs:
         EOF
 
     - name: Build binary
-      run: swift build -c release
+      run: swift build -c release --static-swift-stdlib
 
     - name: Verify binary
       run: |
         ls -la .build/release/asbmutil
-        ldd .build/release/asbmutil | grep GLIBC | sort -u || echo "No GLIBC deps"
+        ldd .build/release/asbmutil | grep GLIBC | sort -u | head -5
         .build/release/asbmutil --version
 
     - name: Create release archive
