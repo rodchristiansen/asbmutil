@@ -8,12 +8,18 @@ import CryptoKit
 import Crypto
 #endif
 
+// --- disable system proxy for all requests ---
+private let plainSession: URLSession = {
+    let cfg = URLSessionConfiguration.default
+    cfg.connectionProxyDictionary = [:]      // ← disable auto-proxy / PAC
+    return URLSession(configuration: cfg)
+}()
+
 actor APIClient {
     private var token: Token
     private let creds: Credentials
     private let profileName: String
-    // Defer session creation to avoid static-init ordering issues on Linux/musl.
-    private let session: URLSession = URLSession(configuration: .default)
+    private let session: URLSession = plainSession  // use proxy-free session
     
     // Retry configuration
     private let maxRetries = 3
@@ -394,12 +400,7 @@ actor APIClient {
         
         for attempt in 0...maxRetries {
             do {
-                let (data, resp): (Data, URLResponse) = try await withCheckedThrowingContinuation { cont in
-                    session.dataTask(with: urlReq) { d, r, err in
-                        if let err = err { cont.resume(throwing: err); return }
-                        cont.resume(returning: (d ?? Data(), r!))
-                    }.resume()
-                }
+                let (data, resp) = try await session.data(for: urlReq)
                 guard let http = resp as? HTTPURLResponse else {
                     throw RuntimeError("Invalid response type")
                 }
@@ -521,26 +522,14 @@ actor APIClient {
         req.setValue("application/x-www-form-urlencoded",
                      forHTTPHeaderField: "Content-Type")
 
-        FileHandle.standardError.write(Data("[NET] POST \(req.url!.absoluteString.prefix(80))\n".utf8))
         let data: Data
         let resp: URLResponse
         do {
-            // Use callback-based dataTask wrapped in a continuation.
-            // On Linux/musl with the Swift Static SDK, the native async
-            // URLSession.data(for:) fails with NSURLErrorUnknown (-1) due to
-            // run-loop integration issues in swift-corelibs-foundation.
-            (data, resp) = try await withCheckedThrowingContinuation { cont in
-                session.dataTask(with: req) { d, r, err in
-                    if let err = err { cont.resume(throwing: err); return }
-                    cont.resume(returning: (d ?? Data(), r!))
-                }.resume()
-            }
+            (data, resp) = try await session.data(for: req)
         } catch {
-            FileHandle.standardError.write(Data("[NET] URLSession error: \(error)\n".utf8))
             throw error
         }
         let http = resp as? HTTPURLResponse
-        FileHandle.standardError.write(Data("[NET] HTTP \(http?.statusCode ?? 0)\n".utf8))
         if http?.statusCode != 200 {
             FileHandle.standardError.write(Data("TOKEN-URL → \(req.url!.absoluteString)\n".utf8))
             FileHandle.standardError.write(data)   // Apple's JSON
