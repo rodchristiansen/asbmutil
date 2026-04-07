@@ -64,3 +64,5 @@ iOSInjectionProject/
 *.sublime-workspace
 dist/
 build/
+
+cmux.json
