@@ -1,3 +1,4 @@
+#if canImport(ObjectiveC)
 import Foundation
 
 /// Protocol for the helper daemon - called by the GUI app
@@ -20,3 +21,4 @@ import Foundation
     /// An error occurred
     func errorOccurred(_ message: String)
 }
+#endif
