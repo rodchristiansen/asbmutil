@@ -364,8 +364,6 @@ struct SettingsView: View {
                     Text("Author").font(.caption).fontWeight(.semibold)
                         .foregroundStyle(.secondary).textCase(.uppercase)
                     Text("Rod Christiansen").font(.body).fontWeight(.medium)
-                    Text("Devices Administrator Lead at Emily Carr University of Art + Design")
-                        .font(.caption).foregroundStyle(.secondary)
                     Text("Vancouver, BC, Canada")
                         .font(.caption).foregroundStyle(.secondary)
                     Text("Managing a fleet of 1000+ computers. Focused on infrastructure, DevOps architecture, CI/CD pipelines, and automating at scale.")
