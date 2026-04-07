@@ -105,22 +105,21 @@ jobs:
 
     - name: Write Version.swift
       run: |
-        cat > Sources/asbmutil/Version.swift << EOF
+        cat > Sources/core/Utilities/Version.swift << 'VERSIONEOF'
         // This file is auto-generated during build
         // Do not edit manually - changes will be overwritten
 
-        enum AppVersion {
-            static let version = "${{ needs.version.outputs.version }}"
+        public enum AppVersion {
+            public static let version = "${{ needs.version.outputs.version }}"
         }
-        EOF
+        VERSIONEOF
 
-    - name: Build binary
-      run: swift build -c release --static-swift-stdlib
+    - name: Build CLI binary
+      run: swift build -c release --product asbmutil --static-swift-stdlib
 
     - name: Verify binary
       run: |
         ls -la .build/release/asbmutil
-        ldd .build/release/asbmutil | grep GLIBC | sort -u | head -5
         .build/release/asbmutil --version
 
     - name: Create release archive
@@ -172,5 +171,7 @@ jobs:
         tag_name: ${{ needs.version.outputs.tag_name }}
         body_path: release_notes.md
         files: |
+          artifacts/ASBMUtil-${{ needs.version.outputs.version }}.pkg/ASBMUtil-${{ needs.version.outputs.version }}.pkg
+          artifacts/ASBMUtil-${{ needs.version.outputs.version }}.dmg/ASBMUtil-${{ needs.version.outputs.version }}.dmg
           artifacts/asbmutil-${{ needs.version.outputs.version }}-macos-arm64/asbmutil-${{ needs.version.outputs.version }}-macos-arm64.zip
           artifacts/asbmutil-${{ needs.version.outputs.version }}-linux-amd64/asbmutil-${{ needs.version.outputs.version }}-linux-amd64.tar.gz

@@ -38,9 +38,19 @@ ICON_DIR = resources/ASBMUtil.icon
 ICON_NAME = ASBMUtil
 ACTOOL_OUT = $(BUILD_ARTIFACTS)/actool-out
 
+# Packaging
+PKG_STAGING = $(DIST_DIR)/pkg-staging
+PKG_NAME = ASBMUtil-$(VERSION).pkg
+DMG_NAME = ASBMUtil-$(VERSION).dmg
+CLI_ZIP_NAME = asbmutil-$(VERSION)-macos-arm64.zip
+PKG_PATH = $(DIST_DIR)/$(PKG_NAME)
+DMG_PATH = $(DIST_DIR)/$(DMG_NAME)
+CLI_ZIP_PATH = $(DIST_DIR)/$(CLI_ZIP_NAME)
+PKG_SCRIPTS_DIR = scripts
+
 # Install paths
 CLI_INSTALL_PATH = /usr/local/bin/$(CLI_NAME)
-APP_INSTALL_PATH = /Applications/Utilities/$(APP_BUNDLE)
+APP_INSTALL_PATH = /Applications/$(APP_BUNDLE)
 
 # Signing (from .env)
 ENTITLEMENTS = entitlements.plist
@@ -52,7 +62,7 @@ YELLOW = \033[1;33m
 BLUE = \033[0;34m
 NC = \033[0m
 
-.PHONY: all build clean swift-build compile-icon sign-binaries create-app-bundle sign-app notarize verify install help check-signing-config
+.PHONY: all build build-unsigned clean swift-build compile-icon sign-binaries create-app-bundle sign-app notarize verify install create-pkg create-dmg create-cli-zip help check-signing-config
 
 all: build
 
@@ -68,6 +78,10 @@ help:
 	@echo "  notarize          - Notarize and staple"
 	@echo "  verify            - Verify signature and notarization"
 	@echo "  install           - Install CLI and App"
+	@echo "  build-unsigned    - Build all unsigned artifacts (.app, .pkg, .dmg, .zip)"
+	@echo "  create-pkg        - Create .pkg installer"
+	@echo "  create-dmg        - Create .dmg disk image"
+	@echo "  create-cli-zip    - Create CLI-only .zip"
 	@echo "  clean             - Remove build artifacts"
 	@echo ""
 	@echo "Configuration:"
@@ -143,7 +157,7 @@ sign-binaries: swift-build
 		$(SWIFT_HELPER)
 	@echo "$(GREEN)Binaries signed$(NC)"
 
-create-app-bundle: sign-binaries compile-icon
+create-app-bundle: swift-build compile-icon
 	@echo "$(BLUE)Creating app bundle...$(NC)"
 	@rm -rf $(APP_BUNDLE_PATH)
 	@mkdir -p $(APP_MACOS) $(APP_RESOURCES) $(APP_LAUNCHDAEMONS)
@@ -221,3 +235,45 @@ clean:
 	@chmod -R u+w .build 2>/dev/null || true
 	@rm -rf .build || true
 	@echo "$(GREEN)Clean complete$(NC)"
+
+build-unsigned: swift-build compile-icon create-app-bundle create-pkg create-dmg create-cli-zip
+	@echo "$(GREEN)Unsigned build complete$(NC)"
+	@echo "  $(APP_BUNDLE_PATH)"
+	@echo "  $(PKG_PATH)"
+	@echo "  $(DMG_PATH)"
+	@echo "  $(CLI_ZIP_PATH)"
+
+create-pkg: create-app-bundle
+	@echo "$(BLUE)Creating installer package...$(NC)"
+	@rm -rf $(PKG_STAGING)
+	@mkdir -p $(PKG_STAGING) $(DIST_DIR)
+	@cp -R $(APP_BUNDLE_PATH) $(PKG_STAGING)/
+	@chmod +x $(PKG_SCRIPTS_DIR)/postinstall
+	@pkgbuild \
+		--root $(PKG_STAGING) \
+		--install-location /Applications \
+		--scripts $(PKG_SCRIPTS_DIR) \
+		--identifier com.github.rodchristiansen.asbmutil.pkg \
+		--version $(VERSION) \
+		$(PKG_PATH)
+	@rm -rf $(PKG_STAGING)
+	@echo "$(GREEN)Package created: $(PKG_PATH)$(NC)"
+
+create-dmg: create-app-bundle
+	@echo "$(BLUE)Creating disk image...$(NC)"
+	@mkdir -p $(DIST_DIR)
+	@rm -f $(DMG_PATH)
+	@hdiutil create \
+		-volname "ASBMUtil" \
+		-srcfolder $(APP_BUNDLE_PATH) \
+		-ov \
+		-format UDZO \
+		$(DMG_PATH)
+	@echo "$(GREEN)Disk image created: $(DMG_PATH)$(NC)"
+
+create-cli-zip: swift-build
+	@echo "$(BLUE)Creating CLI zip...$(NC)"
+	@mkdir -p $(DIST_DIR)
+	@rm -f $(CLI_ZIP_PATH)
+	@zip -j $(CLI_ZIP_PATH) $(SWIFT_CLI)
+	@echo "$(GREEN)CLI zip created: $(CLI_ZIP_PATH)$(NC)"
