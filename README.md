@@ -1,8 +1,10 @@
-# `asbmutil`
+# ASBMUtil
 
-Swift command‑line interface for [Apple School & Business Manager API](https://developer.apple.com/documentation/apple-school-and-business-manager-api)
+A swift app and `asbmutil` cli for [Apple School & Business Manager API](https://developer.apple.com/documentation/apple-school-and-business-manager-api)
 
 Get devices info, assign/unassign MDM servers, and resolve device-to-server assignments across your fleet.
+
+![ASBMUtil app interface](https://github.com/rodchristiansen/asbmutil/blob/feature/swiftui-gui/resources/main.png?raw=true)
 
 ## Features
 
@@ -11,13 +13,15 @@ Get devices info, assign/unassign MDM servers, and resolve device-to-server assi
 * Multiple profile support for managing different AxM instances
 * Automatic OAuth 2 client‑assertion handling
 * Paginated device fetch for large inventories
-* CSV file support for bulk operations
+* Bulk operations with CSV support or directly in the GUI app
 * StrictConcurrency enabled
 * Bulk device-to-server resolution via server-side device listing (4-5 API calls regardless of fleet size)
 * **NEW (API 1.5)**: MAC addresses support multiple values (array format) for devices with multiple network interfaces
 * **NEW (API 1.4)**: Wi-Fi, Bluetooth, and built-in Ethernet MAC addresses for macOS
 * **NEW (API 1.3)**: AppleCare coverage lookup for devices
 * **NEW (API 1.2)**: Wi-Fi and Bluetooth MAC addresses for iOS, iPadOS, tvOS, and visionOS
+
+![ASBMUtil bulk reassignment interface](https://github.com/rodchristiansen/asbmutil/blob/feature/swiftui-gui/resources/bulk.png?raw=true)
 
 ## Quick setup
 
@@ -123,6 +127,8 @@ For organizations managing multiple ABM instances, you can create named profiles
 # Show current profile
 ./asbmutil config show-profile
 ```
+
+![ASBMUtil profiles](https://github.com/rodchristiansen/asbmutil/blob/feature/swiftui-gui/resources/settings.png?raw=true)
 
 ## Commands
 
@@ -253,6 +259,11 @@ This approach is particularly useful for:
 * **Administrative tools** that aggregate data from multiple sources
 * **Testing environments** where you need to validate against different ABM setups
 
+## Export reports
+
+Use the share sheet export button to export selection or filtered results to many formats
+![ASBMUtil export](https://github.com/rodchristiansen/asbmutil/blob/feature/swiftui-gui/resources/export.png?raw=true)
+
 ## CSV File Format
 
 For bulk operations, you can use a CSV file where the first column contains device serial numbers:
@@ -374,6 +385,8 @@ Pagination complete: 10 total devices across 1 pages (limited to 10)
   }
 ]
 ```
+
+![ASBMUtil servers list](https://github.com/rodchristiansen/asbmutil/blob/feature/swiftui-gui/resources/servers.png?raw=true)
 
 ### Get Assigned MDM
 
