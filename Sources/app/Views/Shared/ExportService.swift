@@ -43,7 +43,7 @@ enum ExportFormat: String, CaseIterable, Identifiable {
 }
 
 enum ExportService {
-    static func export(devices: [DeviceAttributes], format: ExportFormat) {
+    @MainActor static func export(devices: [DeviceAttributes], format: ExportFormat) {
         let content = generate(devices: devices, format: format)
         let panel = NSSavePanel()
         panel.allowedContentTypes = [format.contentType]
@@ -55,7 +55,7 @@ enum ExportService {
         }
     }
 
-    static func copyToClipboard(devices: [DeviceAttributes], format: ExportFormat) {
+    @MainActor static func copyToClipboard(devices: [DeviceAttributes], format: ExportFormat) {
         let content = generate(devices: devices, format: format)
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(content, forType: .string)
