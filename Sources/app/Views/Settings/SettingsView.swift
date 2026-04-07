@@ -201,14 +201,6 @@ struct SettingsView: View {
                                 .clipShape(Capsule())
                         }
                     }
-                    HStack(spacing: 8) {
-                        Text(profile.scope.isEmpty ? "No credentials" : profile.scope)
-                            .font(.caption).foregroundStyle(.secondary)
-                        if !profile.clientId.isEmpty {
-                            Text(String(profile.clientId.prefix(24)) + "...")
-                                .font(.caption).foregroundStyle(.tertiary)
-                        }
-                    }
                 }
 
                 Spacer()
@@ -254,33 +246,30 @@ struct SettingsView: View {
     }
 
     private func credentialFields() -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Client ID").font(.caption).foregroundStyle(.secondary)
-                TextField("SCHOOLAPI.xxx or BUSINESSAPI.xxx", text: $viewModel.clientId)
-                    .textFieldStyle(.roundedBorder).fontDesign(.monospaced).font(.callout)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Client ID").font(.callout).foregroundStyle(.secondary)
+                    .frame(width: 60, alignment: .trailing)
+                TextField(text: $viewModel.clientId, prompt: Text("SCHOOLAPI.xxx or BUSINESSAPI.xxx")) {}
+                    .textFieldStyle(.squareBorder).fontDesign(.monospaced).font(.callout)
             }
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Key ID").font(.caption).foregroundStyle(.secondary)
-                TextField("Key ID from Apple", text: $viewModel.keyId)
-                    .textFieldStyle(.roundedBorder).fontDesign(.monospaced).font(.callout)
+            HStack {
+                Text("Key ID").font(.callout).foregroundStyle(.secondary)
+                    .frame(width: 60, alignment: .trailing)
+                TextField(text: $viewModel.keyId, prompt: Text("Key ID from Apple")) {}
+                    .textFieldStyle(.squareBorder).fontDesign(.monospaced).font(.callout)
             }
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Private Key").font(.caption).foregroundStyle(.secondary)
-                HStack {
-                    if viewModel.pemContent.isEmpty {
-                        Button("Select PEM File...") { showFilePicker = true }
-                            .controlSize(.small)
-                    } else {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(.green).font(.caption)
-                        Text("Loaded (\(viewModel.pemContent.count) chars)")
-                            .font(.caption).foregroundStyle(.secondary)
-                        Button("Change...") { showFilePicker = true }
-                            .controlSize(.small)
-                    }
+            HStack {
+                Text("PEM Key").font(.callout).foregroundStyle(.secondary)
+                    .frame(width: 60, alignment: .trailing)
+                if viewModel.pemContent.isEmpty {
+                    Button("Select PEM File...") { showFilePicker = true }.controlSize(.small)
+                } else {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).font(.caption)
+                    Text("Loaded (\(viewModel.pemContent.count) chars)").font(.caption).foregroundStyle(.secondary)
+                    Button("Change...") { showFilePicker = true }.controlSize(.small)
                 }
             }
 
@@ -305,7 +294,7 @@ struct SettingsView: View {
 
                 statusIndicator
             }
-            .padding(.top, 2)
+            .padding(.leading, 68)
         }
     }
 
