@@ -1,18 +1,36 @@
 {
   "color-space-for-untagged-svg-colors" : "display-p3",
   "fill" : {
-    "automatic-gradient" : "display-p3:0.20000,0.45000,0.85000,1.00000"
+    "automatic-gradient" : "display-p3:0.00714,0.12080,0.45955,1.00000",
+    "orientation" : {
+      "start" : {
+        "x" : 0.5,
+        "y" : 0
+      },
+      "stop" : {
+        "x" : 0.5,
+        "y" : 0.7
+      }
+    }
   },
   "groups" : [
     {
       "layers" : [
         {
-          "image-name" : "foreground.png",
-          "name" : "Foreground"
-        },
-        {
-          "image-name" : "background.png",
-          "name" : "Background"
+          "image-name" : "ABSM 2.png",
+          "name" : "ABSM 2",
+          "position-specializations" : [
+            {
+              "idiom" : "macOS",
+              "value" : {
+                "scale" : 0.7,
+                "translation-in-points" : [
+                  -4.5499999999999545,
+                  -30.078125
+                ]
+              }
+            }
+          ]
         }
       ],
       "shadow" : {
