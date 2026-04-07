@@ -128,7 +128,7 @@ For organizations managing multiple ABM instances, you can create named profiles
 ./asbmutil config show-profile
 ```
 
-![ASBMUtil profiles](https://github.com/rodchristiansen/asbmutil/blob/feature/swiftui-gui/resources/settings.png?raw=true)
+![ASBMUtil profiles](https://github.com/rodchristiansen/asbmutil/blob/feature/swiftui-gui/resources/profiles.png?raw=true))
 
 ## Commands
 
