@@ -4,7 +4,7 @@ A swift app and `asbmutil` cli for [Apple School & Business Manager API](https:/
 
 Get devices info, assign/unassign MDM servers, and resolve device-to-server assignments across your fleet.
 
-![ASBMUtil app interface](https://github.com/rodchristiansen/asbmutil/blob/feature/swiftui-gui/resources/main.png?raw=true)
+![ASBMUtil app interface](https://github.com/rodchristiansen/asbmutil/raw/main/resources/main.png?raw=true)
 
 ## Features
 
@@ -22,7 +22,7 @@ Get devices info, assign/unassign MDM servers, and resolve device-to-server assi
 * **NEW (API 1.3)**: AppleCare coverage lookup for devices (single-serial via `get-devices-info`, whole-fleet via `list-devices --include-applecare`)
 * **NEW (API 1.2)**: Wi-Fi and Bluetooth MAC addresses for iOS, iPadOS, tvOS, and visionOS
 
-![ASBMUtil bulk reassignment interface](https://github.com/rodchristiansen/asbmutil/blob/feature/swiftui-gui/resources/bulk.png?raw=true)
+![ASBMUtil bulk reassignment interface](https://github.com/rodchristiansen/asbmutil/raw/main/resources/bulk.png?raw=true)
 
 ## Quick setup
 
@@ -129,7 +129,7 @@ For organizations managing multiple ABM instances, you can create named profiles
 ./asbmutil config show-profile
 ```
 
-![ASBMUtil profiles](https://github.com/rodchristiansen/asbmutil/blob/feature/swiftui-gui/resources/profiles.png?raw=true))
+![ASBMUtil profiles](https://github.com/rodchristiansen/asbmutil/raw/main/resources/profiles.png?raw=true))
 
 ## Commands
 
@@ -266,7 +266,7 @@ This approach is particularly useful for:
 ## Export reports
 
 Use the share sheet export button to export selection or filtered results to many formats
-![ASBMUtil export](https://github.com/rodchristiansen/asbmutil/blob/feature/swiftui-gui/resources/export.png?raw=true)
+![ASBMUtil export](https://github.com/rodchristiansen/asbmutil/raw/main/resources/export.png?raw=true)
 
 ## CSV File Format
 
@@ -458,7 +458,7 @@ anyway). The 429/backoff retry path still applies on top of the two-pass model.
 ]
 ```
 
-![ASBMUtil servers list](https://github.com/rodchristiansen/asbmutil/blob/feature/swiftui-gui/resources/servers.png?raw=true)
+![ASBMUtil servers list](https://github.com/rodchristiansen/asbmutil/raw/main/resources/servers.png?raw=true)
 
 ### Get Assigned MDM
 
