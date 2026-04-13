@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-macos:
+    runs-on: macos-14
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Select Xcode with Swift 6+
+      run: |
+        sudo xcode-select -s /Applications/Xcode_16.1.app
+        swift --version
+
+    - name: Write Version.swift
+      env:
+        SHA: ${{ github.sha }}
+      run: |
+        SHORT_SHA="${SHA:0:7}"
+        cat > Sources/core/Utilities/Version.swift << EOF
+        // This file is auto-generated during build
+        // Do not edit manually - changes will be overwritten
+
+        public enum AppVersion {
+            public static let version = "dev-${SHORT_SHA}"
+        }
+        EOF
+
+    - name: Build all products (CLI + App + Helper)
+      run: swift build -c release
+
+    - name: Verify CLI binary
+      run: |
+        ls -la .build/release/asbmutil
+        .build/release/asbmutil --version
+        .build/release/asbmutil --help
+
+  build-linux:
+    runs-on: ubuntu-latest
+    container:
+      image: swift:6.0-focal
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Write Version.swift
+      env:
+        SHA: ${{ github.sha }}
+      run: |
+        SHORT_SHA="${SHA:0:7}"
+        cat > Sources/core/Utilities/Version.swift << EOF
+        // This file is auto-generated during build
+        // Do not edit manually - changes will be overwritten
+
+        public enum AppVersion {
+            public static let version = "dev-${SHORT_SHA}"
+        }
+        EOF
+
+    - name: Build CLI binary
+      run: swift build -c release --product asbmutil --static-swift-stdlib
+
+    - name: Verify binary
+      run: |
+        ls -la .build/release/asbmutil
+        ldd .build/release/asbmutil | grep GLIBC | sort -u | head -5
+        .build/release/asbmutil --version

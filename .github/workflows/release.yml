@@ -1,8 +1,7 @@
-name: Build
+name: Release
 
 on:
   push:
-    branches: [ main ]
     tags: [ 'v*' ]
 
 permissions:
@@ -13,44 +12,14 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
-      should_release: ${{ steps.tag.outputs.should_release }}
-      tag_name: ${{ steps.tag.outputs.tag_name }}
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-
-    - name: Generate version number
+    - name: Derive version from tag
       id: version
+      env:
+        TAG: ${{ github.ref_name }}
       run: |
-        export TZ=America/Vancouver
-        VERSION=$(date +'%Y.%m.%d.%H%M')
-        echo "version=$VERSION" >> $GITHUB_OUTPUT
-
-    - name: Resolve tag
-      id: tag
-      run: |
-        if [[ "${{ github.ref }}" == refs/tags/* ]]; then
-          echo "tag_name=${{ github.ref_name }}" >> $GITHUB_OUTPUT
-          echo "should_release=true" >> $GITHUB_OUTPUT
-        elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
-          TAG="${{ steps.version.outputs.version }}"
-          if git tag -l "$TAG" | grep -q "$TAG"; then
-            echo "Tag $TAG already exists, skipping release"
-            echo "should_release=false" >> $GITHUB_OUTPUT
-          else
-            git config user.name "GitHub Actions"
-            git config user.email "actions@github.com"
-            git tag "$TAG"
-            git push origin "$TAG"
-            echo "should_release=true" >> $GITHUB_OUTPUT
-          fi
-          echo "tag_name=$TAG" >> $GITHUB_OUTPUT
-        else
-          echo "should_release=false" >> $GITHUB_OUTPUT
-          echo "tag_name=" >> $GITHUB_OUTPUT
-        fi
+        VERSION="${TAG#v}"
+        echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
   build-macos:
     needs: version
@@ -64,35 +33,35 @@ jobs:
         sudo xcode-select -s /Applications/Xcode_16.1.app
         swift --version
 
-    - name: Write Version.swift
+    - name: Build unsigned artifacts (.app, .pkg, .dmg, CLI .zip)
+      env:
+        VERSION: ${{ needs.version.outputs.version }}
       run: |
-        cat > Sources/asbmutil/Version.swift << EOF
-        // This file is auto-generated during build
-        // Do not edit manually - changes will be overwritten
+        make build-unsigned
+        ls -la dist/
 
-        enum AppVersion {
-            static let version = "${{ needs.version.outputs.version }}"
-        }
-        EOF
-
-    - name: Build binary
-      run: swift build -c release
-
-    - name: Verify binary
+    - name: Verify CLI binary
       run: |
-        ls -la .build/release/asbmutil
         .build/release/asbmutil --version
         .build/release/asbmutil --help
 
-    - name: Create release zip
-      run: |
-        zip -j asbmutil-${{ needs.version.outputs.version }}-macos-arm64.zip .build/release/asbmutil
+    - name: Upload .pkg
+      uses: actions/upload-artifact@v4
+      with:
+        name: ASBMUtil-${{ needs.version.outputs.version }}-pkg
+        path: dist/ASBMUtil-${{ needs.version.outputs.version }}.pkg
 
-    - name: Upload artifact
+    - name: Upload .dmg
+      uses: actions/upload-artifact@v4
+      with:
+        name: ASBMUtil-${{ needs.version.outputs.version }}-dmg
+        path: dist/ASBMUtil-${{ needs.version.outputs.version }}.dmg
+
+    - name: Upload CLI zip
       uses: actions/upload-artifact@v4
       with:
         name: asbmutil-${{ needs.version.outputs.version }}-macos-arm64
-        path: asbmutil-${{ needs.version.outputs.version }}-macos-arm64.zip
+        path: dist/asbmutil-${{ needs.version.outputs.version }}-macos-arm64.zip
 
   build-linux:
     needs: version
@@ -104,15 +73,17 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Write Version.swift
+      env:
+        VERSION: ${{ needs.version.outputs.version }}
       run: |
-        cat > Sources/core/Utilities/Version.swift << 'VERSIONEOF'
+        cat > Sources/core/Utilities/Version.swift << EOF
         // This file is auto-generated during build
         // Do not edit manually - changes will be overwritten
 
         public enum AppVersion {
-            public static let version = "${{ needs.version.outputs.version }}"
+            public static let version = "${VERSION}"
         }
-        VERSIONEOF
+        EOF
 
     - name: Build CLI binary
       run: swift build -c release --product asbmutil --static-swift-stdlib
@@ -123,8 +94,10 @@ jobs:
         .build/release/asbmutil --version
 
     - name: Create release archive
+      env:
+        VERSION: ${{ needs.version.outputs.version }}
       run: |
-        tar czf asbmutil-${{ needs.version.outputs.version }}-linux-amd64.tar.gz -C .build/release asbmutil
+        tar czf "asbmutil-${VERSION}-linux-amd64.tar.gz" -C .build/release asbmutil
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
@@ -134,7 +107,6 @@ jobs:
 
   release:
     needs: [version, build-macos, build-linux]
-    if: needs.version.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     steps:
     - name: Checkout code
@@ -147,31 +119,16 @@ jobs:
       with:
         path: artifacts
 
-    - name: Generate release notes
-      id: notes
-      run: |
-        TAG="${{ needs.version.outputs.tag_name }}"
-        LAST_TAG=$(git tag --sort=-creatordate | grep -v "$TAG" | head -n 1 || echo "")
-
-        if [ -z "$LAST_TAG" ]; then
-          COMMITS=$(git log --pretty=format:"- %s (%h)" -10)
-        else
-          COMMITS=$(git log ${LAST_TAG}..HEAD --pretty=format:"- %s (%h)")
-        fi
-
-        cat > release_notes.md << EOF
-        ${COMMITS}
-        EOF
-
     - name: Create Release
       uses: softprops/action-gh-release@v2
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        tag_name: ${{ needs.version.outputs.tag_name }}
-        body_path: release_notes.md
+        tag_name: ${{ github.ref_name }}
+        name: ASBMUtil ${{ github.ref_name }}
+        generate_release_notes: true
         files: |
-          artifacts/ASBMUtil-${{ needs.version.outputs.version }}.pkg/ASBMUtil-${{ needs.version.outputs.version }}.pkg
-          artifacts/ASBMUtil-${{ needs.version.outputs.version }}.dmg/ASBMUtil-${{ needs.version.outputs.version }}.dmg
+          artifacts/ASBMUtil-${{ needs.version.outputs.version }}-pkg/ASBMUtil-${{ needs.version.outputs.version }}.pkg
+          artifacts/ASBMUtil-${{ needs.version.outputs.version }}-dmg/ASBMUtil-${{ needs.version.outputs.version }}.dmg
           artifacts/asbmutil-${{ needs.version.outputs.version }}-macos-arm64/asbmutil-${{ needs.version.outputs.version }}-macos-arm64.zip
           artifacts/asbmutil-${{ needs.version.outputs.version }}-linux-amd64/asbmutil-${{ needs.version.outputs.version }}-linux-amd64.tar.gz
