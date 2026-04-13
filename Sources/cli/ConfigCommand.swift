@@ -1,4 +1,5 @@
 import ArgumentParser
+import ASBMUtilCore
 #if canImport(Security)
 import Security
 #endif
@@ -16,20 +17,20 @@ struct Config: ParsableCommand {
         @Option var pemPath: String
         @Option(name: .customLong("profile"), help: "Profile name to store credentials under")
         var profileName: String = "default"
-        
+
         func run() throws {
             let pem = try String(contentsOfFile: pemPath)
             let blob = KCBlob(clientId: clientId, keyId: keyId, privateKey: pem, teamId: "")
             guard Keychain.saveBlob(blob, profileName: profileName) == 0 else {
                 throw RuntimeError("credential store write failed")
             }
-            
+
             // Set as current profile if it's the first one or explicitly requested
             let profiles = Keychain.listProfiles()
             if profiles.count == 1 || profileName != "default" {
                 _ = Keychain.setCurrentProfile(profileName)
             }
-            
+
             print("saved credentials for profile '\(profileName)'")
         }
     }
@@ -37,7 +38,7 @@ struct Config: ParsableCommand {
     struct Show: ParsableCommand {
         @Option(name: .customLong("profile"), help: "Profile name to show credentials for")
         var profileName: String?
-        
+
         func run() throws {
             let profile = profileName ?? Keychain.getCurrentProfile()
             guard let b = Keychain.loadBlob(profileName: profile) else {
@@ -46,7 +47,7 @@ struct Config: ParsableCommand {
             print("Profile: \(profile)")
             print("SBM_CLIENT_ID=\(b.clientId)")
             print("SBM_KEY_ID=\(b.keyId)")
-            print("PRIVATE_KEY=[\(b.privateKey.prefix(30))…]")
+            print("PRIVATE_KEY=[\(b.privateKey.prefix(30))...]")
         }
     }
 
@@ -54,10 +55,10 @@ struct Config: ParsableCommand {
         static let configuration = CommandConfiguration(
             abstract: "Remove stored credentials"
         )
-        
+
         @Option(name: .customLong("profile"), help: "Profile name to clear (default: all profiles)")
         var profileName: String?
-        
+
         func run() throws {
             if let profileName = profileName {
                 let status = Keychain.deleteBlob(profileName: profileName)
@@ -72,10 +73,10 @@ struct Config: ParsableCommand {
                 for profile in profiles {
                     _ = Keychain.deleteBlob(profileName: profile.name)
                 }
-                
+
                 // Clear current profile setting
                 Keychain.clearCurrentProfileEntry()
-                
+
                 print("cleared all profiles")
             }
         }
@@ -86,16 +87,16 @@ struct Config: ParsableCommand {
             commandName: "list-profiles",
             abstract: "List all stored credential profiles"
         )
-        
+
         func run() throws {
             let profiles = Keychain.listProfiles()
             let currentProfile = Keychain.getCurrentProfile()
-            
+
             if profiles.isEmpty {
                 print("no profiles found")
                 return
             }
-            
+
             print("Available profiles:")
             for profile in profiles.sorted(by: { $0.name < $1.name }) {
                 let current = profile.name == currentProfile ? " (current)" : ""
@@ -112,19 +113,19 @@ struct Config: ParsableCommand {
             commandName: "set-profile",
             abstract: "Set the current active profile"
         )
-        
+
         @Argument var profileName: String
-        
+
         func run() throws {
             let profiles = Keychain.listProfiles()
             guard profiles.contains(where: { $0.name == profileName }) else {
                 throw RuntimeError("profile '\(profileName)' not found. Available profiles: \(profiles.map(\.name).joined(separator: ", "))")
             }
-            
+
             guard Keychain.setCurrentProfile(profileName) == 0 else {
                 throw RuntimeError("failed to set current profile")
             }
-            
+
             print("current profile set to '\(profileName)'")
         }
     }
@@ -134,11 +135,11 @@ struct Config: ParsableCommand {
             commandName: "show-profile",
             abstract: "Show the current active profile"
         )
-        
+
         func run() throws {
             let currentProfile = Keychain.getCurrentProfile()
             let profiles = Keychain.listProfiles()
-            
+
             if let profile = profiles.first(where: { $0.name == currentProfile }) {
                 let formatter = DateFormatter()
                 formatter.dateStyle = .medium

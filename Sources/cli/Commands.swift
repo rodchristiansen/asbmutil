@@ -1,4 +1,5 @@
 import ArgumentParser
+import ASBMUtilCore
 import Foundation
 
 struct ListDevices: AsyncParsableCommand {
@@ -82,26 +83,26 @@ struct Assign: AsyncParsableCommand {
     )
     @Option(name: .customLong("serials"), help: "Comma-separated list of device serial numbers")
     var serials: String?
-    
+
     @Option(name: .customLong("csv-file"), help: "Path to CSV file containing serial numbers (first column)")
     var csvFile: String?
-    
+
     @Option(name: .customLong("mdm"), help: "MDM server name")
     var mdmName: String
 
     @Option(name: .customLong("profile"), help: "Profile name to use for credentials")
     var profileName: String?
-    
+
     func validate() throws {
         guard (serials != nil) != (csvFile != nil) else {
             throw ValidationError("Must specify either --serials or --csv-file, but not both")
         }
     }
-    
+
     func run() async throws {
         let client = try await APIClient(credentials: Creds.load(profileName: profileName), profileName: profileName)
         let serviceId = try await client.getMdmServerIdByName(mdmName)
-        
+
         let serialNumbers: [String]
         if let serials = serials {
             serialNumbers = serials
@@ -109,11 +110,11 @@ struct Assign: AsyncParsableCommand {
                 .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
                 .filter { !$0.isEmpty }
         } else if let csvFile = csvFile {
-            serialNumbers = try readSerialsFromCSV(filePath: csvFile)
+            serialNumbers = try CSVParser.readSerials(from: csvFile)
         } else {
             throw ValidationError("No serial numbers provided")
         }
-        
+
         let activityDetails = try await client.createDeviceActivity(
             activityType: "ASSIGN_DEVICES",
             serials: serialNumbers,
@@ -130,26 +131,26 @@ struct Unassign: AsyncParsableCommand {
     )
     @Option(name: .customLong("serials"), help: "Comma-separated list of device serial numbers")
     var serials: String?
-    
+
     @Option(name: .customLong("csv-file"), help: "Path to CSV file containing serial numbers (first column)")
     var csvFile: String?
-    
+
     @Option(name: .customLong("mdm"), help: "MDM server name")
     var mdmName: String
 
     @Option(name: .customLong("profile"), help: "Profile name to use for credentials")
     var profileName: String?
-    
+
     func validate() throws {
         guard (serials != nil) != (csvFile != nil) else {
             throw ValidationError("Must specify either --serials or --csv-file, but not both")
         }
     }
-    
+
     func run() async throws {
         let client = try await APIClient(credentials: Creds.load(profileName: profileName), profileName: profileName)
         let serviceId = try await client.getMdmServerIdByName(mdmName)
-        
+
         let serialNumbers: [String]
         if let serials = serials {
             serialNumbers = serials
@@ -157,11 +158,11 @@ struct Unassign: AsyncParsableCommand {
                 .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
                 .filter { !$0.isEmpty }
         } else if let csvFile = csvFile {
-            serialNumbers = try readSerialsFromCSV(filePath: csvFile)
+            serialNumbers = try CSVParser.readSerials(from: csvFile)
         } else {
             throw ValidationError("No serial numbers provided")
         }
-        
+
         let activityDetails = try await client.createDeviceActivity(
             activityType: "UNASSIGN_DEVICES",
             serials: serialNumbers,
@@ -173,7 +174,7 @@ struct Unassign: AsyncParsableCommand {
 
 struct BatchStatus: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
-        commandName: "batch-status", 
+        commandName: "batch-status",
         abstract: "Check status of a device activity operation"
     )
     @Argument var id: String
@@ -352,7 +353,7 @@ struct ListDevicesServers: AsyncParsableCommand {
         if let serials = serials {
             serialNumbers = serials.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
         } else if let csvFile = csvFile {
-            serialNumbers = try readSerialsFromCSV(filePath: csvFile)
+            serialNumbers = try CSVParser.readSerials(from: csvFile)
         } else {
             throw ValidationError("No serial numbers provided")
         }
@@ -380,11 +381,6 @@ struct ListDevicesServers: AsyncParsableCommand {
             }
         }
 
-        struct DeviceMdmResult: Encodable {
-            let serialNumber: String
-            let assignedMdm: AssignedMdmInfo?
-        }
-
         let output = serialNumbers.map { serial in
             DeviceMdmResult(
                 serialNumber: serial,
@@ -407,12 +403,12 @@ struct GetAssignedMdm: AsyncParsableCommand {
         abstract: "Get the assigned device management service ID for a device",
         shouldDisplay: false
     )
-    
+
     @Argument var deviceId: String
 
     @Option(name: .customLong("profile"), help: "Profile name to use for credentials")
     var profileName: String?
-    
+
     func run() async throws {
         let client = try await APIClient(credentials: Creds.load(profileName: profileName), profileName: profileName)
         let assignedServer = try await client.getAssignedMdm(deviceId: deviceId)
@@ -427,10 +423,10 @@ struct GetDevicesInfo: AsyncParsableCommand {
         commandName: "get-devices-info",
         abstract: "Get full device information by serial number"
     )
-    
+
     @Option(name: .customLong("serials"), help: "One or more serial numbers, comma-separated")
     var serials: String?
-    
+
     @Option(name: .customLong("csv-file"), help: "Path to CSV file containing serial numbers (first column)")
     var csvFile: String?
 
@@ -439,28 +435,28 @@ struct GetDevicesInfo: AsyncParsableCommand {
 
     @Option(name: .customLong("profile"), help: "Profile name to use for credentials")
     var profileName: String?
-    
+
     func validate() throws {
         guard (serials != nil) != (csvFile != nil) else {
             throw ValidationError("Must specify either --serials or --csv-file, but not both")
         }
     }
-    
+
     func run() async throws {
         let client = try await APIClient(credentials: Creds.load(profileName: profileName), profileName: profileName)
-        
+
         let serialNumbers: [String]
         if let serials = serials {
             serialNumbers = serials.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
         } else if let csvFile = csvFile {
-            serialNumbers = try readSerialsFromCSV(filePath: csvFile)
+            serialNumbers = try CSVParser.readSerials(from: csvFile)
         } else {
             throw ValidationError("No serial numbers provided")
         }
-        
+
         let encoder = JSONEncoder()
         encoder.outputFormatting = .prettyPrinted
-        
+
         if serialNumbers.count == 1 {
             let device = try await client.getDevice(serialNumber: serialNumbers[0])
             if mdmOnly {
@@ -489,30 +485,4 @@ struct GetDevicesInfo: AsyncParsableCommand {
             }
         }
     }
-}
-
-// Helper function to read serial numbers from CSV file
-private func readSerialsFromCSV(filePath: String) throws -> [String] {
-    let url = URL(fileURLWithPath: filePath)
-    let content = try String(contentsOf: url, encoding: .utf8)
-    
-    let lines = content.components(separatedBy: .newlines)
-        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-        .filter { !$0.isEmpty }
-    
-    var serials: [String] = []
-    
-    for line in lines {
-        // Split by comma and take the first column (serial number)
-        let columns = line.components(separatedBy: ",")
-        if let firstColumn = columns.first?.trimmingCharacters(in: .whitespacesAndNewlines), !firstColumn.isEmpty {
-            serials.append(firstColumn)
-        }
-    }
-    
-    guard !serials.isEmpty else {
-        throw ValidationError("No valid serial numbers found in CSV file: \(filePath)")
-    }
-    
-    return serials
 }

@@ -1,27 +1,41 @@
-// Sources/asbmutil/Keychain.swift
+// Sources/core/Auth/Keychain.swift
 import Foundation
 
-struct KCBlob: Codable, Sendable {
-    let clientId: String
-    let keyId: String
-    let privateKey: String    // PEM text
-    let teamId: String
+public struct KCBlob: Codable, Sendable {
+    public let clientId: String
+    public let keyId: String
+    public let privateKey: String    // PEM text
+    public let teamId: String
+
+    public init(clientId: String, keyId: String, privateKey: String, teamId: String) {
+        self.clientId = clientId
+        self.keyId = keyId
+        self.privateKey = privateKey
+        self.teamId = teamId
+    }
 }
 
-struct ProfileInfo: Codable, Sendable {
-    let name: String
-    let clientId: String
-    let scope: String
-    let createdDate: Date
+public struct ProfileInfo: Codable, Sendable {
+    public let name: String
+    public let clientId: String
+    public let scope: String
+    public let createdDate: Date
+
+    public init(name: String, clientId: String, scope: String, createdDate: Date) {
+        self.name = name
+        self.clientId = clientId
+        self.scope = scope
+        self.createdDate = createdDate
+    }
 }
 
 #if canImport(Security)
 import Security
 
-enum Keychain {
-    static let service = "com.github.rodchristiansen.asbmutil"
-    static let profilesKey = "PROFILES_LIST"
-    static let currentProfileKey = "CURRENT_PROFILE"
+public enum Keychain {
+    public static let service = "com.github.rodchristiansen.asbmutil"
+    public static let profilesKey = "PROFILES_LIST"
+    public static let currentProfileKey = "CURRENT_PROFILE"
 
     // Base query: data-protection keychain (no per-app ACLs, no prompts)
     private static func baseQuery(account: String) -> [String: Any] {
@@ -37,7 +51,7 @@ enum Keychain {
     // MARK: - Credentials
 
     @discardableResult
-    static func saveBlob(_ blob: KCBlob, profileName: String = "default") -> OSStatus {
+    public static func saveBlob(_ blob: KCBlob, profileName: String = "default") -> OSStatus {
         let data = try! JSONEncoder().encode(blob)
         let accountName = "SBM_CREDENTIALS_\(profileName)"
 
@@ -57,7 +71,7 @@ enum Keychain {
         return status
     }
 
-    static func loadBlob(profileName: String = "default") -> KCBlob? {
+    public static func loadBlob(profileName: String = "default") -> KCBlob? {
         let accountName = "SBM_CREDENTIALS_\(profileName)"
         var q = baseQuery(account: accountName)
         q[kSecReturnData as String] = true
@@ -76,12 +90,12 @@ enum Keychain {
         return loadBlobFromFile(profileName: profileName)
     }
 
-    static func loadBlob() -> KCBlob? {
+    public static func loadBlob() -> KCBlob? {
         let currentProfile = getCurrentProfile()
         return loadBlob(profileName: currentProfile)
     }
 
-    static func deleteBlob(profileName: String) -> OSStatus {
+    public static func deleteBlob(profileName: String) -> OSStatus {
         let accountName = "SBM_CREDENTIALS_\(profileName)"
         deleteLegacyItem(account: accountName)
         removeFromProfilesList(profileName: profileName)
@@ -91,7 +105,7 @@ enum Keychain {
 
     // MARK: - Profiles
 
-    static func listProfiles() -> [ProfileInfo] {
+    public static func listProfiles() -> [ProfileInfo] {
         var q = baseQuery(account: profilesKey)
         q[kSecReturnData as String] = true
         q[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -111,7 +125,7 @@ enum Keychain {
         return loadProfilesListFromFile() ?? []
     }
 
-    static func getCurrentProfile() -> String {
+    public static func getCurrentProfile() -> String {
         var q = baseQuery(account: currentProfileKey)
         q[kSecReturnData as String] = true
         q[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -131,7 +145,8 @@ enum Keychain {
         return loadCurrentProfileFromFile() ?? "default"
     }
 
-    static func setCurrentProfile(_ profileName: String) -> OSStatus {
+    @discardableResult
+    public static func setCurrentProfile(_ profileName: String) -> OSStatus {
         let data = profileName.data(using: .utf8)!
         deleteLegacyItem(account: currentProfileKey)
         var q = baseQuery(account: currentProfileKey)
@@ -255,7 +270,7 @@ enum Keychain {
     }
 
     @discardableResult
-    static func saveToken(_ token: Token, profileName: String = "default") -> OSStatus {
+    public static func saveToken(_ token: Token, profileName: String = "default") -> OSStatus {
         let data = try! JSONEncoder().encode(token)
         let accountName = "SBM_TOKEN_\(profileName)"
 
@@ -272,7 +287,7 @@ enum Keychain {
         return status
     }
 
-    static func loadToken(profileName: String = "default") -> Token? {
+    public static func loadToken(profileName: String = "default") -> Token? {
         let accountName = "SBM_TOKEN_\(profileName)"
         var q = baseQuery(account: accountName)
         q[kSecReturnData as String] = true
@@ -289,14 +304,14 @@ enum Keychain {
     }
 
     @discardableResult
-    static func deleteToken(profileName: String = "default") -> OSStatus {
+    public static func deleteToken(profileName: String = "default") -> OSStatus {
         let accountName = "SBM_TOKEN_\(profileName)"
         deleteLegacyItem(account: accountName)
         let q = baseQuery(account: accountName)
         return SecItemDelete(q as CFDictionary)
     }
 
-    static func clearCurrentProfileEntry() {
+    public static func clearCurrentProfileEntry() {
         deleteLegacyItem(account: currentProfileKey)
         let q = baseQuery(account: currentProfileKey)
         SecItemDelete(q as CFDictionary)
