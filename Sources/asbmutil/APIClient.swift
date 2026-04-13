@@ -440,9 +440,11 @@ actor APIClient {
                     break
                 case .failed(let message):
                     failedSerials.append(serial)
-                    FileHandle.standardError.write(
-                        Data("  AppleCare lookup failed for \(serial): \(message)\n".utf8)
-                    )
+                    if showProgress {
+                        FileHandle.standardError.write(
+                            Data("  AppleCare lookup failed for \(serial): \(message)\n".utf8)
+                        )
+                    }
                 }
                 completed += 1
                 if showProgress && (completed % 25 == 0 || completed == total) {
@@ -495,9 +497,11 @@ actor APIClient {
                     recovered += 1
                 } catch {
                     stillFailed.append(serial)
-                    FileHandle.standardError.write(
-                        Data("  AppleCare pass 2 failed for \(serial): \(error.localizedDescription)\n".utf8)
-                    )
+                    if showProgress {
+                        FileHandle.standardError.write(
+                            Data("  AppleCare pass 2 failed for \(serial): \(error.localizedDescription)\n".utf8)
+                        )
+                    }
                 }
                 if showProgress && ((i + 1) % 25 == 0 || i + 1 == failedSerials.count) {
                     FileHandle.standardError.write(

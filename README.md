@@ -369,9 +369,13 @@ Devices without coverage omit the `appleCareCoverage` field; the built-in 429 ba
 still applies; and a stderr summary at the end distinguishes "no coverage" from
 "lookup failed (retries exhausted after both passes)" so the two aren't conflated.
 
+All progress, pass summaries, and failure lines are written to stderr — the JSON
+array on stdout stays clean for `jq` or any other consumer:
+
 ```bash
 ./asbmutil list-devices --include-applecare | jq
 
+# --- stderr ---
 Page 1: found 100 devices ...
 Pagination complete: 817 total devices across 9 pages
 Fetching AppleCare coverage for 817 devices (concurrency: 4)...
@@ -384,6 +388,8 @@ AppleCare pass 2: recovered 97, 9 still errored
 AppleCare final: 670 with coverage, 138 without, 9 errored (retries exhausted)
 Failed serials: ABC123,DEF456,...
 Rerun with: asbmutil get-devices-info --serials ABC123,DEF456,...
+
+# --- stdout (piped to jq) ---
 [
   {
     "serialNumber": "P8R2K47NF5X9",
@@ -407,9 +413,12 @@ Rerun with: asbmutil get-devices-info --serials ABC123,DEF456,...
 ]
 ```
 
-Raise `--applecare-concurrency` (1-32, default 8) to speed up large fleets at the
-cost of more aggressive rate limiting. The existing retry/backoff path handles
-any 429s that come back.
+`--applecare-concurrency` accepts 1-32 and defaults to 4. Lower it (e.g. 2) on
+flakier networks or if you're seeing many pass-1 failures. Raising it is usually
+counterproductive for this API: Apple's HTTP/2 endpoint multiplexes over one TCP
+connection per host and drops streams aggressively under concurrent load, so more
+parallelism means more pass-1 failures (which pass 2 then has to re-serialize
+anyway). The 429/backoff retry path still applies on top of the two-pass model.
 
 ### List MDM Servers
 
