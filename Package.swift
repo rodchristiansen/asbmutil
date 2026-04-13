@@ -7,7 +7,6 @@ let package = Package(
     products: [
         .executable(name: "asbmutil", targets: ["ASBMUtilCLI"]),
         .executable(name: "ASBMUtilApp", targets: ["ASBMUtilApp"]),
-        .executable(name: "ASBMUtilHelper", targets: ["ASBMUtilHelper"]),
         .library(name: "ASBMUtilCore", targets: ["ASBMUtilCore"]),
     ],
     dependencies: [
@@ -35,11 +34,6 @@ let package = Package(
             name: "ASBMUtilApp",
             dependencies: ["ASBMUtilCore"],
             path: "Sources/app"
-        ),
-        .executableTarget(
-            name: "ASBMUtilHelper",
-            dependencies: ["ASBMUtilCore"],
-            path: "Sources/helper"
         ),
     ],
     swiftLanguageModes: [.v6]

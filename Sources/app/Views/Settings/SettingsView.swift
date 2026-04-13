@@ -43,10 +43,13 @@ struct SettingsView: View {
             Button("Cancel", role: .cancel) { renamingProfile = nil }
             Button("Rename") {
                 if let oldName = renamingProfile, !renameText.trimmingCharacters(in: .whitespaces).isEmpty, renameText != oldName {
-                    // Copy credentials to new name, delete old
                     if let blob = Keychain.loadBlob(profileName: oldName) {
                         Keychain.saveBlob(blob, profileName: renameText)
                     }
+                    if let token = Keychain.loadToken(profileName: oldName) {
+                        _ = Keychain.saveToken(token, profileName: renameText)
+                    }
+                    _ = Keychain.deleteToken(profileName: oldName)
                     _ = Keychain.deleteBlob(profileName: oldName)
                     if Keychain.getCurrentProfile() == oldName {
                         _ = Keychain.setCurrentProfile(renameText)

@@ -117,8 +117,10 @@ public actor APIClient {
             }
         } while cursor != nil
 
-        let limitStatus = totalLimit.map { " (limited to \($0))" } ?? ""
-        FileHandle.standardError.write(Data("Pagination complete: \(totalDevices) total devices across \(page - 1) pages\(limitStatus)\n".utf8))
+        if showPagination {
+            let limitStatus = totalLimit.map { " (limited to \($0))" } ?? ""
+            FileHandle.standardError.write(Data("Pagination complete: \(totalDevices) total devices across \(page - 1) pages\(limitStatus)\n".utf8))
+        }
         return out
     }
 
@@ -300,13 +302,19 @@ public actor APIClient {
     }
 
     /// Fetch all device serial numbers assigned to an MDM server (paginated).
+    ///
+    /// Throws `RuntimeError` if pagination exceeds `maxPages`, rather than silently
+    /// returning a truncated list — callers need to know they got incomplete results.
     public func listMdmServerDevices(serverId: String) async throws -> [String] {
         var serials: [String] = []
         var nextURL: String? = Endpoints.mdmServerDevices(serverId).path + "?limit=1000"
         var page = 0
         let maxPages = 50
 
-        while let urlPath = nextURL, page < maxPages {
+        while let urlPath = nextURL {
+            if page >= maxPages {
+                throw RuntimeError("listMdmServerDevices: pagination exceeded \(maxPages) pages for server \(serverId); results would be truncated at \(serials.count) serials.")
+            }
             let response: MdmServerDevicesResponse = try await send(
                 Request(
                     method: .GET,

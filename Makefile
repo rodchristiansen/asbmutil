@@ -18,12 +18,10 @@ DIST_DIR = dist
 BUILD_ARTIFACTS = build
 CLI_NAME = asbmutil
 APP_NAME = ASBMUtilApp
-HELPER_NAME = ASBMUtilHelper
 APP_BUNDLE = ASBMUtil.app
 SWIFT_BUILD_DIR = .build/release
 SWIFT_CLI = $(SWIFT_BUILD_DIR)/$(CLI_NAME)
 SWIFT_APP = $(SWIFT_BUILD_DIR)/$(APP_NAME)
-SWIFT_HELPER = $(SWIFT_BUILD_DIR)/$(HELPER_NAME)
 VERSION_FILE = Sources/core/Utilities/Version.swift
 
 # App bundle paths
@@ -31,7 +29,6 @@ APP_BUNDLE_PATH = $(DIST_DIR)/$(APP_BUNDLE)
 APP_CONTENTS = $(APP_BUNDLE_PATH)/Contents
 APP_MACOS = $(APP_CONTENTS)/MacOS
 APP_RESOURCES = $(APP_CONTENTS)/Resources
-APP_LAUNCHDAEMONS = $(APP_CONTENTS)/Library/LaunchDaemons
 
 # Icon
 ICON_DIR = resources/ASBMUtil.icon
@@ -151,19 +148,14 @@ sign-binaries: swift-build
 		--options runtime --timestamp --entitlements $(ENTITLEMENTS) \
 		--identifier com.github.rodchristiansen.asbmutil.app \
 		$(SWIFT_APP)
-	@codesign --force --sign "$(SIGNING_IDENTITY_APP)" \
-		--options runtime --timestamp --entitlements $(ENTITLEMENTS) \
-		--identifier com.github.rodchristiansen.asbmutil.helper \
-		$(SWIFT_HELPER)
 	@echo "$(GREEN)Binaries signed$(NC)"
 
 create-app-bundle: swift-build compile-icon
 	@echo "$(BLUE)Creating app bundle...$(NC)"
 	@rm -rf $(APP_BUNDLE_PATH)
-	@mkdir -p $(APP_MACOS) $(APP_RESOURCES) $(APP_LAUNCHDAEMONS)
+	@mkdir -p $(APP_MACOS) $(APP_RESOURCES)
 	@# Copy binaries
 	@cp $(SWIFT_APP) $(APP_MACOS)/
-	@cp $(SWIFT_HELPER) $(APP_MACOS)/
 	@cp $(SWIFT_CLI) $(APP_MACOS)/
 	@chmod 755 $(APP_MACOS)/*
 	@# Create Info.plist
@@ -187,11 +179,6 @@ create-app-bundle: swift-build compile-icon
 		/usr/libexec/PlistBuddy -c "Add :CFBundleIconName string $(ICON_NAME)" $(APP_CONTENTS)/Info.plist; \
 		echo "  Copied $(ICON_NAME).icns"; \
 	fi
-	@# Helper LaunchDaemon plist
-	@/usr/libexec/PlistBuddy -c "Clear dict" $(APP_LAUNCHDAEMONS)/com.github.rodchristiansen.asbmutil.helper.plist 2>/dev/null || true
-	@/usr/libexec/PlistBuddy -c "Add :Label string com.github.rodchristiansen.asbmutil.helper" $(APP_LAUNCHDAEMONS)/com.github.rodchristiansen.asbmutil.helper.plist
-	@/usr/libexec/PlistBuddy -c "Add :MachServices dict" $(APP_LAUNCHDAEMONS)/com.github.rodchristiansen.asbmutil.helper.plist
-	@/usr/libexec/PlistBuddy -c "Add :MachServices:com.github.rodchristiansen.asbmutil.helper bool true" $(APP_LAUNCHDAEMONS)/com.github.rodchristiansen.asbmutil.helper.plist
 	@echo "$(GREEN)App bundle created$(NC)"
 
 sign-app: create-app-bundle

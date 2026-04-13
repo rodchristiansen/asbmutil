@@ -16,9 +16,6 @@ final class AppViewModel {
     private(set) var connectionState: ConnectionState = .disconnected
     private(set) var connectionError: String?
 
-    // XPC client
-    let xpcClient = XPCClient()
-
     enum ConnectionState: Equatable {
         case disconnected
         case connecting
