@@ -1,0 +1,16 @@
+#!/bin/bash
+# postinstall script for ASBMUtil.pkg
+# Creates a symlink for the CLI tool in /usr/local/bin
+
+CLI_SOURCE="/Applications/ASBMUtil.app/Contents/MacOS/asbmutil"
+CLI_LINK="/usr/local/bin/asbmutil"
+
+mkdir -p /usr/local/bin
+
+if [ -e "$CLI_LINK" ] || [ -L "$CLI_LINK" ]; then
+    rm -f "$CLI_LINK"
+fi
+
+ln -s "$CLI_SOURCE" "$CLI_LINK"
+
+exit 0

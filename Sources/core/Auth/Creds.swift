@@ -1,7 +1,7 @@
 import Foundation
 
-enum Creds {
-    static func load(profileName: String? = nil) throws -> Credentials {
+public enum Creds {
+    public static func load(profileName: String? = nil) throws -> Credentials {
         let profile = profileName ?? Keychain.getCurrentProfile()
         guard let blob = Keychain.loadBlob(profileName: profile) else {
             if let profileName = profileName {
