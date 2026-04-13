@@ -16,9 +16,10 @@ Get devices info, assign/unassign MDM servers, and resolve device-to-server assi
 * Bulk operations with CSV support or directly in the GUI app
 * StrictConcurrency enabled
 * Bulk device-to-server resolution via server-side device listing (4-5 API calls regardless of fleet size)
+* Bulk AppleCare enrichment for whole fleets via `list-devices --include-applecare` (two-pass fan-out, no CSV required)
 * **NEW (API 1.5)**: MAC addresses support multiple values (array format) for devices with multiple network interfaces
 * **NEW (API 1.4)**: Wi-Fi, Bluetooth, and built-in Ethernet MAC addresses for macOS
-* **NEW (API 1.3)**: AppleCare coverage lookup for devices
+* **NEW (API 1.3)**: AppleCare coverage lookup for devices (single-serial via `get-devices-info`, whole-fleet via `list-devices --include-applecare`)
 * **NEW (API 1.2)**: Wi-Fi and Bluetooth MAC addresses for iOS, iPadOS, tvOS, and visionOS
 
 ![ASBMUtil bulk reassignment interface](https://github.com/rodchristiansen/asbmutil/blob/feature/swiftui-gui/resources/bulk.png?raw=true)
