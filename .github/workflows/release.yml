@@ -23,15 +23,16 @@ jobs:
 
   build-macos:
     needs: version
-    runs-on: macos-14
+    runs-on: macos-26
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Select Xcode with Swift 6+
+    - name: Select Xcode 26 (Icon Composer support)
       run: |
-        sudo xcode-select -s /Applications/Xcode_16.1.app
+        sudo xcode-select -s /Applications/Xcode_26.4.app
         swift --version
+        xcodebuild -version
 
     - name: Build unsigned artifacts (.app, .pkg, .dmg, CLI .zip)
       env:

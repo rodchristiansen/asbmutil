@@ -132,10 +132,22 @@ compile-icon:
 			--app-icon $(ICON_NAME) \
 			--output-partial-info-plist $(ACTOOL_OUT)/partial-info.plist \
 			--warnings --errors \
-			$(ICON_DIR) > /dev/null && \
-		echo "$(GREEN)Icon compiled: Assets.car + $(ICON_NAME).icns$(NC)"; \
+			$(ICON_DIR) > /dev/null 2>&1 || true; \
+	fi
+	@# Fall back to pre-compiled assets in resources/ if actool (older Xcode) did not emit outputs.
+	@if [ ! -f "$(ACTOOL_OUT)/$(ICON_NAME).icns" ] && [ -f "resources/$(ICON_NAME).icns" ]; then \
+		cp "resources/$(ICON_NAME).icns" "$(ACTOOL_OUT)/$(ICON_NAME).icns"; \
+		echo "$(YELLOW)Using pre-compiled icns from resources/$(NC)"; \
+	fi
+	@if [ ! -f "$(ACTOOL_OUT)/Assets.car" ] && [ -f "resources/Assets.car" ]; then \
+		cp "resources/Assets.car" "$(ACTOOL_OUT)/Assets.car"; \
+		echo "$(YELLOW)Using pre-compiled Assets.car from resources/$(NC)"; \
+	fi
+	@if [ -f "$(ACTOOL_OUT)/$(ICON_NAME).icns" ] || [ -f "$(ACTOOL_OUT)/Assets.car" ]; then \
+		echo "$(GREEN)Icon ready$(NC)"; \
 	else \
-		echo "$(YELLOW)No icon assets found in $(ICON_DIR)/Assets/ - skipping$(NC)"; \
+		echo "$(RED)Icon not produced and no fallback in resources/ — app will ship without an icon$(NC)"; \
+		exit 1; \
 	fi
 
 sign-binaries: swift-build
