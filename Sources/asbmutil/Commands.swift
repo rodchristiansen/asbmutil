@@ -9,12 +9,21 @@ struct ListDevices: AsyncParsableCommand {
 
     @Option(name: .customLong("devices-per-page"), help: "Number of devices per API request (default: API default, typically 100)")
     var devicesPerPage: Int?
-    
+
     @Option(name: .customLong("total-limit"), help: "Maximum total number of devices to retrieve (default: no limit)")
     var totalLimit: Int?
-    
+
     @Flag(name: .customLong("show-pagination"), help: "Show detailed pagination information")
     var showPagination: Bool = false
+
+    @Flag(name: .customLong("include-applecare"), help: "After listing, fetch AppleCare coverage per device (one API call per device, runs in parallel)")
+    var includeAppleCare: Bool = false
+
+    @Option(name: .customLong("applecare-concurrency"), help: "Number of concurrent AppleCare lookups when --include-applecare is set (default: 4, max: 32; Apple's HTTP/2 endpoint drops streams above ~4)")
+    var appleCareConcurrency: Int = 4
+
+    @Flag(name: .customLong("no-applecare-retry"), help: "Skip the sequential second-pass retry for AppleCare lookups that fail the parallel pass")
+    var noAppleCareRetry: Bool = false
 
     @Option(name: .customLong("profile"), help: "Profile name to use for credentials")
     var profileName: String?
@@ -30,12 +39,15 @@ struct ListDevices: AsyncParsableCommand {
                 throw ValidationError("Total limit must be greater than 0")
             }
         }
+        guard appleCareConcurrency >= 1 && appleCareConcurrency <= 32 else {
+            throw ValidationError("AppleCare concurrency must be between 1 and 32")
+        }
     }
 
     func run() async throws {
         let credentials = try Creds.load(profileName: profileName)
         let client = try await APIClient(credentials: credentials, profileName: profileName)
-        
+
         if showPagination {
             FileHandle.standardError.write(Data("Starting device listing with pagination details...\n".utf8))
             if let totalLimit = totalLimit {
@@ -45,9 +57,21 @@ struct ListDevices: AsyncParsableCommand {
                 FileHandle.standardError.write(Data("Devices per page: \(devicesPerPage)\n".utf8))
             }
         }
-        
+
         let devices = try await client.listDevices(devicesPerPage: devicesPerPage, totalLimit: totalLimit, showPagination: showPagination)
-        print(String(decoding: try JSONEncoder().encode(devices), as: UTF8.self))
+
+        let encoder = JSONEncoder()
+        if includeAppleCare {
+            let enriched = await client.enrichWithAppleCare(
+                devices: devices,
+                concurrency: appleCareConcurrency,
+                retryFailedSequentially: !noAppleCareRetry,
+                showProgress: true
+            )
+            print(String(decoding: try encoder.encode(enriched), as: UTF8.self))
+        } else {
+            print(String(decoding: try encoder.encode(devices), as: UTF8.self))
+        }
     }
 }
 

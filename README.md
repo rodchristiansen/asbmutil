@@ -144,6 +144,9 @@ For organizations managing multiple ABM instances, you can create named profiles
 ./asbmutil list-devices --total-limit 50
 ./asbmutil list-devices --total-limit 1000 --devices-per-page 100
 ./asbmutil list-devices --show-pagination
+./asbmutil list-devices --include-applecare                            # Enrich every device with AppleCare coverage (4 parallel)
+./asbmutil list-devices --include-applecare --applecare-concurrency 2  # Lower concurrency for flakier networks
+./asbmutil list-devices --include-applecare --no-applecare-retry       # Skip the sequential second-pass retry
 
 # Device Operations (using specific profile)
 ./asbmutil list-devices --profile "school-district-2"
@@ -348,6 +351,65 @@ Page 1: retrieved 10/100 devices (devices per page: 100), total so far: 10 [limi
 Reached total limit of 10 devices
 Pagination complete: 10 total devices across 1 pages (limited to 10)
 ```
+
+### List Devices with AppleCare Coverage
+
+Apple's API has no bulk AppleCare endpoint (`/v1/orgDevices/{serial}/appleCareCoverage`
+is one serial per call), so `--include-applecare` lists devices as usual and then fans
+out per-device coverage lookups in two passes:
+
+1. **Parallel pass** (default 4 concurrent) — fast, but Apple's HTTP/2 endpoint drops
+   streams under higher concurrency, so ~10-15% of requests typically exhaust retries.
+   Empirically, raising concurrency past ~4 makes failure rates much worse, not better.
+2. **Sequential pass** (concurrency 1) — retries only the failed serials one at a time;
+   recovers the vast majority because single in-flight requests don't trigger HTTP/2
+   stream resets. Skip with `--no-applecare-retry`.
+
+Devices without coverage omit the `appleCareCoverage` field; the built-in 429 backoff
+still applies; and a stderr summary at the end distinguishes "no coverage" from
+"lookup failed (retries exhausted after both passes)" so the two aren't conflated.
+
+```bash
+./asbmutil list-devices --include-applecare | jq
+
+Page 1: found 100 devices ...
+Pagination complete: 817 total devices across 9 pages
+Fetching AppleCare coverage for 817 devices (concurrency: 4)...
+  AppleCare: 25/817
+  AppleCare: 50/817
+  ...
+AppleCare pass 1: 573 with coverage, 138 without, 106 errored
+AppleCare pass 2: retrying 106 failed serials sequentially...
+AppleCare pass 2: recovered 97, 9 still errored
+AppleCare final: 670 with coverage, 138 without, 9 errored (retries exhausted)
+Failed serials: ABC123,DEF456,...
+Rerun with: asbmutil get-devices-info --serials ABC123,DEF456,...
+[
+  {
+    "serialNumber": "P8R2K47NF5X9",
+    "partNumber": "Z0RT",
+    "appleCareCoverage": [
+      {
+        "agreementNumber": "0000000001",
+        "description": "AppleCare+",
+        "status": "ACTIVE",
+        "startDateTime": "2025-04-17T00:00:00Z",
+        "endDateTime": "2026-04-17T00:00:00Z",
+        "isRenewable": true,
+        "isCanceled": false
+      }
+    ]
+  },
+  {
+    "serialNumber": "Q7M5V83WH4L2",
+    "partNumber": "MD455C/A"
+  }
+]
+```
+
+Raise `--applecare-concurrency` (1-32, default 8) to speed up large fleets at the
+cost of more aggressive rate limiting. The existing retry/backoff path handles
+any 429s that come back.
 
 ### List MDM Servers
 

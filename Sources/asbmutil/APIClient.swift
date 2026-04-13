@@ -353,7 +353,7 @@ actor APIClient {
     }
 
     // MARK: - AppleCare Coverage (API 1.3)
-    
+
     /// Get AppleCare coverage for a device by serial number
     func getAppleCareCoverage(deviceSerialNumber: String) async throws -> AppleCareCoverage {
         let response: AppleCareResponse = try await send(
@@ -364,11 +364,180 @@ actor APIClient {
                 body: nil
             )
         )
-        
+
         return AppleCareCoverage(
             deviceSerialNumber: deviceSerialNumber,
             coverages: response.data.map(\.attributes)
         )
+    }
+
+    /// Fan out per-device AppleCare coverage lookups with bounded concurrency.
+    ///
+    /// Apple's API has no bulk AppleCare endpoint — `/v1/orgDevices/{serial}/appleCareCoverage`
+    /// is one serial per call. To enrich a large device list we dispatch a capped number of
+    /// concurrent requests; the `send()`/retry path already handles 429s with Retry-After backoff.
+    ///
+    /// When `retryFailedSequentially` is true (default), serials that exhaust retries in the
+    /// parallel pass are retried once more sequentially (concurrency 1). Apple's API uses
+    /// HTTP/2 multiplexing over a single TCP connection per host, so higher parallelism means
+    /// more server-side stream resets ("The network connection was lost"). In empirical runs,
+    /// concurrency 4 produces ~13% pass-1 failures; concurrency 8 blows up to ~50%+. The
+    /// sequential pass recovers most of those because one in-flight request can't trigger
+    /// multiplexed stream drops. 4 is the sweet spot for this API.
+    ///
+    /// Devices that return empty coverage get `appleCareCoverage: nil` in the output.
+    /// Devices whose lookup failed both passes are ALSO returned with `appleCareCoverage: nil`
+    /// but their serials are printed to stderr so the caller can distinguish "no AppleCare"
+    /// from "lookup failed".
+    func enrichWithAppleCare(
+        devices: [DeviceAttributes],
+        concurrency: Int = 4,
+        retryFailedSequentially: Bool = true,
+        showProgress: Bool = false
+    ) async -> [DeviceInfo] {
+        guard !devices.isEmpty else { return [] }
+        let cap = max(1, min(concurrency, 32))
+        let total = devices.count
+
+        if showProgress {
+            FileHandle.standardError.write(
+                Data("Fetching AppleCare coverage for \(total) devices (concurrency: \(cap))...\n".utf8)
+            )
+        }
+
+        // Outcome is explicit so we can distinguish "no coverage" from "lookup failed".
+        enum Outcome: Sendable {
+            case found([AppleCareAttributes])
+            case none
+            case failed(String) // localized error message
+        }
+
+        var coverageBySerial: [String: [AppleCareAttributes]] = [:]
+        var failedSerials: [String] = []
+        var completed = 0
+
+        await withTaskGroup(of: (String, Outcome).self) { group in
+            var index = 0
+
+            while index < cap && index < total {
+                let serial = devices[index].serialNumber
+                group.addTask { [self] in
+                    do {
+                        let coverage = try await self.getAppleCareCoverage(deviceSerialNumber: serial)
+                        return (serial, coverage.coverages.isEmpty ? .none : .found(coverage.coverages))
+                    } catch {
+                        return (serial, .failed(error.localizedDescription))
+                    }
+                }
+                index += 1
+            }
+
+            while let (serial, outcome) = await group.next() {
+                switch outcome {
+                case .found(let coverages):
+                    coverageBySerial[serial] = coverages
+                case .none:
+                    break
+                case .failed(let message):
+                    failedSerials.append(serial)
+                    FileHandle.standardError.write(
+                        Data("  AppleCare lookup failed for \(serial): \(message)\n".utf8)
+                    )
+                }
+                completed += 1
+                if showProgress && (completed % 25 == 0 || completed == total) {
+                    FileHandle.standardError.write(
+                        Data("  AppleCare: \(completed)/\(total)\n".utf8)
+                    )
+                }
+                if index < total {
+                    let next = devices[index].serialNumber
+                    group.addTask { [self] in
+                        do {
+                            let coverage = try await self.getAppleCareCoverage(deviceSerialNumber: next)
+                            return (next, coverage.coverages.isEmpty ? .none : .found(coverage.coverages))
+                        } catch {
+                            return (next, .failed(error.localizedDescription))
+                        }
+                    }
+                    index += 1
+                }
+            }
+        }
+
+        // Pass 1 stats (before any sequential retry).
+        let pass1Covered = coverageBySerial.count
+        let pass1Failed = failedSerials.count
+        let pass1None = total - pass1Covered - pass1Failed
+
+        if showProgress {
+            FileHandle.standardError.write(
+                Data("AppleCare pass 1: \(pass1Covered) with coverage, \(pass1None) without, \(pass1Failed) errored\n".utf8)
+            )
+        }
+
+        // Pass 2 — sequential retry for the errored serials. Single in-flight request
+        // avoids the HTTP/2 stream-reset behavior that plagues parallel pass 1.
+        var stillFailed: [String] = []
+        if retryFailedSequentially && !failedSerials.isEmpty {
+            if showProgress {
+                FileHandle.standardError.write(
+                    Data("AppleCare pass 2: retrying \(failedSerials.count) failed serials sequentially...\n".utf8)
+                )
+            }
+            var recovered = 0
+            for (i, serial) in failedSerials.enumerated() {
+                do {
+                    let coverage = try await getAppleCareCoverage(deviceSerialNumber: serial)
+                    if !coverage.coverages.isEmpty {
+                        coverageBySerial[serial] = coverage.coverages
+                    }
+                    recovered += 1
+                } catch {
+                    stillFailed.append(serial)
+                    FileHandle.standardError.write(
+                        Data("  AppleCare pass 2 failed for \(serial): \(error.localizedDescription)\n".utf8)
+                    )
+                }
+                if showProgress && ((i + 1) % 25 == 0 || i + 1 == failedSerials.count) {
+                    FileHandle.standardError.write(
+                        Data("  AppleCare pass 2: \(i + 1)/\(failedSerials.count)\n".utf8)
+                    )
+                }
+            }
+            if showProgress {
+                FileHandle.standardError.write(
+                    Data("AppleCare pass 2: recovered \(recovered - stillFailed.count), \(stillFailed.count) still errored\n".utf8)
+                )
+            }
+        } else {
+            stillFailed = failedSerials
+        }
+
+        if showProgress {
+            let finalCovered = coverageBySerial.count
+            let finalFailed = stillFailed.count
+            let finalNone = total - finalCovered - finalFailed
+            FileHandle.standardError.write(
+                Data("AppleCare final: \(finalCovered) with coverage, \(finalNone) without, \(finalFailed) errored (retries exhausted)\n".utf8)
+            )
+            if !stillFailed.isEmpty {
+                FileHandle.standardError.write(
+                    Data("Failed serials: \(stillFailed.joined(separator: ","))\n".utf8)
+                )
+                FileHandle.standardError.write(
+                    Data("Rerun with: asbmutil get-devices-info --serials \(stillFailed.joined(separator: ","))\n".utf8)
+                )
+            }
+        }
+
+        return devices.map { device in
+            DeviceInfo(
+                device: device,
+                appleCareCoverage: coverageBySerial[device.serialNumber],
+                assignedMdm: nil
+            )
+        }
     }
 
     func send<T: Decodable>(_ req: Request<T>) async throws -> T {
