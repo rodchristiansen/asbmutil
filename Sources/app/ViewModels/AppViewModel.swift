@@ -28,6 +28,10 @@ final class AppViewModel {
     // Shared device filter state — survives navigation between sections
     let deviceFilters = DeviceFilters()
 
+    // Tracks the in-flight per-server count fan-out so we can cancel it on
+    // refresh or profile switch and avoid stale results overwriting newer ones.
+    private var serverCountsTask: Task<Void, Never>?
+
     enum ConnectionState: Equatable {
         case disconnected
         case connecting
@@ -45,6 +49,9 @@ final class AppViewModel {
     }
 
     func switchProfile(_ name: String) async {
+        serverCountsTask?.cancel()
+        serverCountsTask = nil
+
         activeProfile = name
         _ = Keychain.setCurrentProfile(name)
         apiClient = nil
@@ -56,6 +63,8 @@ final class AppViewModel {
         serverDeviceCounts = [:]
         deviceLoadError = nil
         devicesLastLoaded = nil
+        isLoadingDevices = false
+        isLoadingServerCounts = false
         deviceFilters.clearAll()
     }
 
@@ -118,7 +127,12 @@ final class AppViewModel {
 
         // Kick off per-server counts in the background — dashboard server card
         // needs them but the rest of the dashboard can render without them.
-        Task { await self.loadServerDeviceCounts() }
+        // Cancel any prior fan-out so a stale task can't overwrite fresh results
+        // when the user refreshes rapidly or switches profiles mid-load.
+        serverCountsTask?.cancel()
+        serverCountsTask = Task { [weak self] in
+            await self?.loadServerDeviceCounts()
+        }
     }
 
     func refreshDevices() async {
@@ -150,6 +164,10 @@ final class AppViewModel {
             }
             return out
         }
+
+        // If we were cancelled mid-fan-out (e.g. by another refresh starting up
+        // or by a profile switch), drop the result so we don't clobber state.
+        guard !Task.isCancelled else { return }
         serverDeviceCounts = counts
         isLoadingServerCounts = false
     }
