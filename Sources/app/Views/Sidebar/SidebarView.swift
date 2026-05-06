@@ -9,6 +9,11 @@ struct SidebarView: View {
         @Bindable var vm = appViewModel
 
         List(selection: $selection) {
+            Section("Overview") {
+                Label("Dashboard", systemImage: NavigationSection.dashboard.icon)
+                    .tag(NavigationSection.dashboard)
+            }
+
             Section("Browse") {
                 Label("Devices", systemImage: NavigationSection.devices.icon)
                     .tag(NavigationSection.devices)

@@ -1,74 +1,29 @@
 import SwiftUI
 import ASBMUtilCore
 
-// MARK: - Filter Model
-
-enum FilterCategory: String, CaseIterable, Identifiable {
-    case status = "Status"
-    case source = "Source"
-    case orderNumber = "Order Number"
-    case productFamily = "Device Type"
-    case capacity = "Storage Size"
-    var id: String { rawValue }
-}
-
-@Observable
-@MainActor
-final class DeviceFilters {
-    var selectedCategory: FilterCategory = .status
-    var selectedValues: [FilterCategory: Set<String>] = [:]
-    var availableValues: [FilterCategory: [String]] = [:]
-
-    func buildFromDevices(_ devices: [DeviceAttributes]) {
-        availableValues[.status] = uniqueSorted(devices.compactMap(\.status))
-        availableValues[.source] = uniqueSorted(devices.compactMap(\.purchaseSourceType))
-        availableValues[.orderNumber] = uniqueSorted(devices.compactMap(\.orderNumber))
-        availableValues[.productFamily] = uniqueSorted(devices.compactMap(\.productFamily))
-        availableValues[.capacity] = uniqueSorted(devices.compactMap(\.deviceCapacity))
-    }
-
-    func isActive(_ cat: FilterCategory) -> Bool { !(selectedValues[cat]?.isEmpty ?? true) }
-    var hasActiveFilters: Bool { selectedValues.values.contains { !$0.isEmpty } }
-
-    func toggle(value: String, in cat: FilterCategory) {
-        var s = selectedValues[cat] ?? []
-        if s.contains(value) { s.remove(value) } else { s.insert(value) }
-        selectedValues[cat] = s
-    }
-    func clearAll() { selectedValues.removeAll() }
-
-    func matches(_ d: DeviceAttributes) -> Bool {
-        for (cat, vals) in selectedValues where !vals.isEmpty {
-            let v: String?
-            switch cat {
-            case .status: v = d.status
-            case .source: v = d.purchaseSourceType
-            case .orderNumber: v = d.orderNumber
-            case .productFamily: v = d.productFamily
-            case .capacity: v = d.deviceCapacity
-            }
-            guard let v, vals.contains(v) else { return false }
-        }
-        return true
-    }
-
-    private func uniqueSorted(_ v: [String]) -> [String] {
-        Array(Set(v)).sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
-    }
-}
-
 // MARK: - DeviceListView
 
 struct DeviceListView: View {
     @Environment(AppViewModel.self) private var appViewModel
-    @State private var viewModel = DeviceListViewModel()
+    @State private var searchText = ""
     @State private var selectedDeviceIDs: Set<String> = []
     @State private var showingInspector = false
     @State private var showFilters = false
-    @State private var filters = DeviceFilters()
+
+    private var filters: DeviceFilters { appViewModel.deviceFilters }
+
+    private var searchedDevices: [DeviceAttributes] {
+        guard !searchText.isEmpty else { return appViewModel.devices }
+        return appViewModel.devices.filter { device in
+            device.serialNumber.localizedCaseInsensitiveContains(searchText) ||
+            device.displayModel.localizedCaseInsensitiveContains(searchText) ||
+            (device.productFamily ?? "").localizedCaseInsensitiveContains(searchText) ||
+            (device.status ?? "").localizedCaseInsensitiveContains(searchText)
+        }
+    }
 
     private var displayedDevices: [DeviceAttributes] {
-        var result = viewModel.filteredDevices
+        var result = searchedDevices
         if filters.hasActiveFilters { result = result.filter { filters.matches($0) } }
         return result
     }
@@ -80,19 +35,16 @@ struct DeviceListView: View {
     var body: some View {
         mainContent
             .navigationTitle(navigationTitle)
-            .searchable(text: $viewModel.searchText, prompt: "Search")
+            .searchable(text: $searchText, prompt: "Search")
             .toolbar { leadingToolbar }
             .toolbar { trailingToolbar }
             .inspector(isPresented: $showingInspector) { inspectorContent }
             .onChange(of: selectedDeviceIDs) { _, newValue in
                 showingInspector = !newValue.isEmpty
             }
-            .onChange(of: viewModel.devices) { _, devices in
-                filters.buildFromDevices(devices)
-            }
             .task {
-                if viewModel.devices.isEmpty && !viewModel.isLoading {
-                    await loadDevices()
+                if appViewModel.devices.isEmpty && !appViewModel.isLoadingDevices {
+                    await appViewModel.loadDevices()
                 }
             }
     }
@@ -101,16 +53,16 @@ struct DeviceListView: View {
 
     @ViewBuilder
     private var mainContent: some View {
-        if viewModel.isLoading {
+        if appViewModel.isLoadingDevices && appViewModel.devices.isEmpty {
             ProgressView("Loading devices...")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if let error = viewModel.errorMessage {
+        } else if let error = appViewModel.deviceLoadError, appViewModel.devices.isEmpty {
             ContentUnavailableView {
                 Label("Error", systemImage: "exclamationmark.triangle")
             } description: { Text(error) } actions: {
-                Button("Retry") { Task { await loadDevices() } }
+                Button("Retry") { Task { await appViewModel.refreshDevices() } }
             }
-        } else if viewModel.devices.isEmpty {
+        } else if appViewModel.devices.isEmpty {
             ContentUnavailableView("No Devices", systemImage: "desktopcomputer")
         } else {
             DeviceTable(devices: displayedDevices, selection: $selectedDeviceIDs)
@@ -183,18 +135,18 @@ struct DeviceListView: View {
             .disabled(displayedDevices.isEmpty)
 
             Button {
-                Task { await loadDevices() }
+                Task { await appViewModel.refreshDevices() }
             } label: {
                 Label("Refresh", systemImage: "arrow.clockwise")
             }
-            .disabled(viewModel.isLoading)
+            .disabled(appViewModel.isLoadingDevices)
             .keyboardShortcut("r", modifiers: .command)
         }
     }
 
     private var navigationTitle: String {
-        if viewModel.isLoading { return "Devices" }
-        let total = viewModel.devices.count
+        if appViewModel.isLoadingDevices && appViewModel.devices.isEmpty { return "Devices" }
+        let total = appViewModel.devices.count
         let shown = displayedDevices.count
         if !selectedDeviceIDs.isEmpty {
             return "Devices (\(selectedDeviceIDs.count) selected of \(shown))"
@@ -207,21 +159,12 @@ struct DeviceListView: View {
             ? displayedDevices
             : displayedDevices.filter { selectedDeviceIDs.contains($0.serialNumber) }
     }
-
-    private func loadDevices() async {
-        do {
-            let client = try await appViewModel.ensureConnected()
-            await viewModel.loadDevices(client: client)
-        } catch {
-            viewModel.errorMessage = error.localizedDescription
-        }
-    }
 }
 
 // MARK: - Filter Panel (ABM-style, popover)
 
 struct FilterPanelView: View {
-    @Bindable var filters: DeviceFilters
+    let filters: DeviceFilters
     @State private var searchText = ""
 
     private var filteredValues: [String] {
