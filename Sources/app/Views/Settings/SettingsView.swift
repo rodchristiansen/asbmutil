@@ -152,7 +152,15 @@ struct SettingsView: View {
                     .keyboardShortcut(.cancelAction)
                 Spacer()
                 Button("Create") {
-                    let blob = KCBlob(clientId: newClientId, keyId: newKeyId, privateKey: newPem, teamId: "")
+                    let cleanClientId = newClientId.sanitizedIdentifier
+                    let cleanKeyId = newKeyId.sanitizedIdentifier
+                    guard !cleanClientId.contains(where: { $0.isNewline }),
+                          !cleanKeyId.contains(where: { $0.isNewline }) else {
+                        return
+                    }
+                    newClientId = cleanClientId
+                    newKeyId = cleanKeyId
+                    let blob = KCBlob(clientId: cleanClientId, keyId: cleanKeyId, privateKey: newPem, teamId: "")
                     Keychain.saveBlob(blob, profileName: newName)
                     viewModel.loadProfiles()
                     appViewModel.loadProfiles()
