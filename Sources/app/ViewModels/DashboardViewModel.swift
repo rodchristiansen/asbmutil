@@ -5,7 +5,19 @@ struct DashboardBin: Identifiable, Hashable {
     let label: String
     let count: Int
     let filterValue: String?
-    var id: String { label }
+    /// Stable identifier for ForEach/Charts. Defaults to `label` for value-keyed
+    /// bins (status, source, etc.) where labels are unique by construction; for
+    /// server bins we explicitly pass the server id so duplicate server names
+    /// don't collapse rows or crash the chart.
+    let idKey: String
+    var id: String { idKey }
+
+    init(label: String, count: Int, filterValue: String?, idKey: String? = nil) {
+        self.label = label
+        self.count = count
+        self.filterValue = filterValue
+        self.idKey = idKey ?? label
+    }
 }
 
 struct TimelineBin: Identifiable, Hashable {
@@ -78,7 +90,8 @@ struct DashboardStats {
                 DashboardBin(
                     label: serverNameById[id] ?? id,
                     count: count,
-                    filterValue: nil
+                    filterValue: nil,
+                    idKey: id
                 )
             }
             .sorted { $0.count > $1.count }
@@ -151,7 +164,8 @@ struct DashboardStats {
 
         let cal = Calendar(identifier: .gregorian)
         let now = Date()
-        guard let startMonth = cal.date(byAdding: .month, value: -11, to: cal.date(from: cal.dateComponents([.year, .month], from: now))!) else {
+        guard let currentMonth = cal.date(from: cal.dateComponents([.year, .month], from: now)),
+              let startMonth = cal.date(byAdding: .month, value: -11, to: currentMonth) else {
             return []
         }
 
