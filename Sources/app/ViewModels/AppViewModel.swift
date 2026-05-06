@@ -16,6 +16,18 @@ final class AppViewModel {
     private(set) var connectionState: ConnectionState = .disconnected
     private(set) var connectionError: String?
 
+    // Shared device + server caches (Dashboard and Devices both read from these)
+    var devices: [DeviceAttributes] = []
+    var mdmServers: [MdmServerWithId] = []
+    var serverDeviceCounts: [String: Int] = [:]
+    var isLoadingDevices = false
+    var isLoadingServerCounts = false
+    var deviceLoadError: String?
+    var devicesLastLoaded: Date?
+
+    // Shared device filter state — survives navigation between sections
+    let deviceFilters = DeviceFilters()
+
     enum ConnectionState: Equatable {
         case disconnected
         case connecting
@@ -39,6 +51,12 @@ final class AppViewModel {
         connectionState = .disconnected
         isAuthenticated = false
         connectionError = nil
+        devices = []
+        mdmServers = []
+        serverDeviceCounts = [:]
+        deviceLoadError = nil
+        devicesLastLoaded = nil
+        deviceFilters.clearAll()
     }
 
     func connect() async {
@@ -76,5 +94,63 @@ final class AppViewModel {
             throw RuntimeError(connectionError ?? "Failed to connect")
         }
         return client
+    }
+
+    // MARK: - Device + Server loading
+
+    func loadDevices(force: Bool = false) async {
+        if !force, !devices.isEmpty { return }
+        isLoadingDevices = true
+        deviceLoadError = nil
+        do {
+            let client = try await ensureConnected()
+            async let deviceList = client.listDevices(devicesPerPage: 1000, totalLimit: nil, showPagination: false)
+            async let serverList = client.listMdmServers()
+            let (loaded, servers) = try await (deviceList, serverList)
+            devices = loaded
+            mdmServers = servers
+            devicesLastLoaded = Date()
+            deviceFilters.buildFromDevices(loaded)
+        } catch {
+            deviceLoadError = error.localizedDescription
+        }
+        isLoadingDevices = false
+
+        // Kick off per-server counts in the background — dashboard server card
+        // needs them but the rest of the dashboard can render without them.
+        Task { await self.loadServerDeviceCounts() }
+    }
+
+    func refreshDevices() async {
+        serverDeviceCounts = [:]
+        await loadDevices(force: true)
+    }
+
+    /// listDevices doesn't return assignedServer relationships, so the dashboard's
+    /// per-server counts come from listMdmServerDevices fanned out per server.
+    func loadServerDeviceCounts() async {
+        guard let client = apiClient, !mdmServers.isEmpty else { return }
+        isLoadingServerCounts = true
+        let servers = mdmServers
+        let counts = await withTaskGroup(of: (String, Int)?.self) { group -> [String: Int] in
+            for server in servers {
+                let id = server.id
+                group.addTask {
+                    do {
+                        let serials = try await client.listMdmServerDevices(serverId: id)
+                        return (id, serials.count)
+                    } catch {
+                        return nil
+                    }
+                }
+            }
+            var out: [String: Int] = [:]
+            for await result in group {
+                if let (id, count) = result { out[id] = count }
+            }
+            return out
+        }
+        serverDeviceCounts = counts
+        isLoadingServerCounts = false
     }
 }
