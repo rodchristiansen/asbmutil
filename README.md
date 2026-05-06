@@ -4,6 +4,8 @@ A swift app and `asbmutil` cli for [Apple School & Business Manager API](https:/
 
 Get devices info, assign/unassign MDM servers, and resolve device-to-server assignments across your fleet.
 
+![ASBMUtil dashboard](https://github.com/rodchristiansen/asbmutil/raw/main/resources/dashboard.png?raw=true)
+
 ![ASBMUtil app interface](https://github.com/rodchristiansen/asbmutil/raw/main/resources/main.png?raw=true)
 
 ## Features

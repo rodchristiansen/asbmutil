@@ -2,6 +2,7 @@ import SwiftUI
 import ASBMUtilCore
 
 enum NavigationSection: String, Hashable, CaseIterable {
+    case dashboard = "Dashboard"
     case devices = "Devices"
     case mdmServers = "Servers"
     case assignments = "Assignments"
@@ -10,6 +11,7 @@ enum NavigationSection: String, Hashable, CaseIterable {
 
     var icon: String {
         switch self {
+        case .dashboard: return "chart.bar.xaxis"
         case .devices: return "desktopcomputer"
         case .mdmServers: return "server.rack"
         case .assignments: return "arrow.left.arrow.right"
@@ -21,13 +23,18 @@ enum NavigationSection: String, Hashable, CaseIterable {
 
 struct ContentView: View {
     @Environment(AppViewModel.self) private var appViewModel
-    @State private var selectedSection: NavigationSection? = .devices
+    @State private var selectedSection: NavigationSection? = .dashboard
 
     var body: some View {
         NavigationSplitView {
             SidebarView(selection: $selectedSection)
         } detail: {
             switch selectedSection {
+            case .dashboard:
+                DashboardView { category, value in
+                    appViewModel.deviceFilters.setOnly(value: value, in: category)
+                    selectedSection = .devices
+                }
             case .devices:
                 DeviceListView()
             case .mdmServers:
