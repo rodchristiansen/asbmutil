@@ -613,6 +613,21 @@ Both modes use efficient server-side device listing (4-5 API calls regardless of
 }
 ```
 
+## Network proxy
+
+`asbmutil` honors the macOS system proxy / PAC by default — no configuration needed in most managed environments.
+
+For headless or container use you can also set the standard env vars:
+
+```bash
+export HTTPS_PROXY=http://proxy.corp.example:8080
+export NO_PROXY=*.internal.example,localhost
+```
+
+`HTTPS_PROXY` is preferred (all API traffic is HTTPS); `HTTP_PROXY` is honored as a fallback. `NO_PROXY` is matched against the auth host (`account.apple.com`) and the scope-specific API host (`api-business.apple.com` or `api-school.apple.com`); if every host is bypassed, the env-var proxy is skipped and the system proxy applies. Lowercase variants (`https_proxy`, etc.) work too.
+
+Proxies that require authentication should rely on system credentials (Negotiate/Kerberos via macOS); embedded `user:pass@` in the proxy URL is not currently extracted.
+
 ## Requirements
 
 * macOS 14 or newer  
