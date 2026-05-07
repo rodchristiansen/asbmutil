@@ -55,7 +55,17 @@ final class SettingsViewModel {
         isSaving = true
         saveStatus = nil
 
-        let blob = KCBlob(clientId: clientId, keyId: keyId, privateKey: pemContent, teamId: "")
+        let cleanClientId = clientId.sanitizedIdentifier
+        let cleanKeyId = keyId.sanitizedIdentifier
+        if cleanClientId.contains(where: { $0.isNewline }) || cleanKeyId.contains(where: { $0.isNewline }) {
+            saveStatus = .error("Client ID and Key ID must be single-line values")
+            isSaving = false
+            return
+        }
+        clientId = cleanClientId
+        keyId = cleanKeyId
+
+        let blob = KCBlob(clientId: cleanClientId, keyId: cleanKeyId, privateKey: pemContent, teamId: "")
         let status = Keychain.saveBlob(blob, profileName: selectedProfileName)
 
         if status == 0 {

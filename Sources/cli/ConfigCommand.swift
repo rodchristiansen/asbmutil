@@ -19,8 +19,13 @@ struct Config: ParsableCommand {
         var profileName: String = "default"
 
         func run() throws {
+            let cleanClientId = clientId.sanitizedIdentifier
+            let cleanKeyId = keyId.sanitizedIdentifier
+            if cleanClientId.contains(where: { $0.isNewline }) || cleanKeyId.contains(where: { $0.isNewline }) {
+                throw RuntimeError("--client-id and --key-id must be single-line values")
+            }
             let pem = try String(contentsOfFile: pemPath)
-            let blob = KCBlob(clientId: clientId, keyId: keyId, privateKey: pem, teamId: "")
+            let blob = KCBlob(clientId: cleanClientId, keyId: cleanKeyId, privateKey: pem, teamId: "")
             guard Keychain.saveBlob(blob, profileName: profileName) == 0 else {
                 throw RuntimeError("credential store write failed")
             }
