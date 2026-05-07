@@ -10,10 +10,15 @@ public enum Creds {
                 throw RuntimeError("missing keychain items for current profile '\(profile)' – run: asbmutil config set")
             }
         }
-        let scope = blob.clientId.hasPrefix("SCHOOLAPI") ? "school.api" : "business.api"
+        let cleanClientId = blob.clientId.sanitizedIdentifier
+        let cleanKeyId = blob.keyId.sanitizedIdentifier
+        if cleanClientId.contains(where: { $0.isNewline }) || cleanKeyId.contains(where: { $0.isNewline }) {
+            throw RuntimeError("stored credentials for profile '\(profile)' contain embedded newlines (likely a paste error). Re-save them in Settings or run: asbmutil config set --profile \(profile)")
+        }
+        let scope = cleanClientId.hasPrefix("SCHOOLAPI") ? "school.api" : "business.api"
         return Credentials(
-            clientId:      blob.clientId,
-            keyId:         blob.keyId,
+            clientId:      cleanClientId,
+            keyId:         cleanKeyId,
             privateKeyPEM: blob.privateKey,
             scope:         scope
         )

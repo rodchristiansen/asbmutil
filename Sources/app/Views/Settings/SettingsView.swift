@@ -83,6 +83,7 @@ struct SettingsView: View {
     @State private var newKeyId = ""
     @State private var newPem = ""
     @State private var showNewPemPicker = false
+    @State private var newProfileError: String?
 
     private var profilesTab: some View {
         Form {
@@ -97,6 +98,7 @@ struct SettingsView: View {
                     newClientId = ""
                     newKeyId = ""
                     newPem = ""
+                    newProfileError = nil
                 } label: {
                     Label("Add Profile", systemImage: "plus")
                 }
@@ -147,16 +149,33 @@ struct SettingsView: View {
                 }
             }
 
+            if let newProfileError {
+                Label(newProfileError, systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.red).font(.caption)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             HStack {
                 Button("Cancel") { showNewProfile = false }
                     .keyboardShortcut(.cancelAction)
                 Spacer()
                 Button("Create") {
-                    let blob = KCBlob(clientId: newClientId, keyId: newKeyId, privateKey: newPem, teamId: "")
-                    Keychain.saveBlob(blob, profileName: newName)
+                    let cleanName = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let cleanClientId = newClientId.sanitizedIdentifier
+                    let cleanKeyId = newKeyId.sanitizedIdentifier
+                    if cleanClientId.contains(where: { $0.isNewline }) || cleanKeyId.contains(where: { $0.isNewline }) {
+                        newProfileError = "Client ID and Key ID must be single-line values — re-paste without line breaks."
+                        return
+                    }
+                    newName = cleanName
+                    newClientId = cleanClientId
+                    newKeyId = cleanKeyId
+                    newProfileError = nil
+                    let blob = KCBlob(clientId: cleanClientId, keyId: cleanKeyId, privateKey: newPem, teamId: "")
+                    Keychain.saveBlob(blob, profileName: cleanName)
                     viewModel.loadProfiles()
                     appViewModel.loadProfiles()
-                    expandedProfile = newName
+                    expandedProfile = cleanName
                     showNewProfile = false
                 }
                 .buttonStyle(.borderedProminent)
