@@ -71,8 +71,15 @@ public actor APIClient {
         func bypassed(_ host: String) -> Bool {
             let h = host.lowercased()
             return bypass.contains { pattern in
-                let p = pattern.hasPrefix(".") ? String(pattern.dropFirst()) : pattern
-                return p == "*" || h == p || h.hasSuffix("." + p)
+                if pattern == "*" { return true }
+                // Accept curl/Docker-style `*.foo`, `.foo`, and bare `foo` as suffix patterns.
+                var p = pattern
+                if p.hasPrefix("*.") {
+                    p = String(p.dropFirst(2))
+                } else if p.hasPrefix(".") {
+                    p = String(p.dropFirst())
+                }
+                return h == p || h.hasSuffix("." + p)
             }
         }
 
