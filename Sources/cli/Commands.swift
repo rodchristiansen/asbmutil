@@ -26,6 +26,9 @@ struct ListDevices: AsyncParsableCommand {
     @Flag(name: .customLong("no-applecare-retry"), help: "Skip the sequential second-pass retry for AppleCare lookups that fail the parallel pass")
     var noAppleCareRetry: Bool = false
 
+    @Flag(name: .customLong("resume"), help: "Persist progress after each page and pick up from a saved cursor on subsequent runs. State is cleared on successful completion.")
+    var resume: Bool = false
+
     @Option(name: .customLong("profile"), help: "Profile name to use for credentials")
     var profileName: String?
 
@@ -59,7 +62,52 @@ struct ListDevices: AsyncParsableCommand {
             }
         }
 
-        let devices = try await client.listDevices(devicesPerPage: devicesPerPage, totalLimit: totalLimit, showPagination: showPagination)
+        let resolvedProfile = profileName ?? Keychain.getCurrentProfile()
+        let resumeHandle: APIClient.ResumeHandle?
+        let store: ResumeStore?
+        if resume {
+            let s = try ResumeStore(profile: resolvedProfile)
+            store = s
+            let prior = try s.load()
+            if let prior {
+                if let savedPerPage = prior.devicesPerPage, let nowPerPage = devicesPerPage, savedPerPage != nowPerPage {
+                    FileHandle.standardError.write(Data("Warning: resuming with devicesPerPage=\(nowPerPage) but saved state used \(savedPerPage). Apple's cursor should still work.\n".utf8))
+                }
+                FileHandle.standardError.write(Data("Resuming from \(s.path) — \(prior.devices.count) devices, \(prior.pagesCompleted) pages completed.\n".utf8))
+            } else {
+                FileHandle.standardError.write(Data("No prior progress; starting fresh and saving to \(s.path) after each page.\n".utf8))
+            }
+            let perPage = devicesPerPage
+            let limit = totalLimit
+            resumeHandle = APIClient.ResumeHandle(
+                startCursor: prior?.cursor,
+                initialDevices: prior?.devices ?? []
+            ) { cursor, devices, pagesCompleted in
+                let state = ListDevicesResumeState(
+                    profile: resolvedProfile,
+                    cursor: cursor,
+                    devices: devices,
+                    devicesPerPage: perPage,
+                    totalLimit: limit,
+                    pagesCompleted: pagesCompleted
+                )
+                try s.save(state)
+            }
+        } else {
+            store = nil
+            resumeHandle = nil
+        }
+
+        let devices = try await client.listDevices(
+            devicesPerPage: devicesPerPage,
+            totalLimit: totalLimit,
+            showPagination: showPagination,
+            resume: resumeHandle
+        )
+
+        if resume {
+            try store?.clear()
+        }
 
         let encoder = JSONEncoder()
         if includeAppleCare {

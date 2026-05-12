@@ -150,6 +150,7 @@ For organizations managing multiple ABM instances, you can create named profiles
 ./asbmutil list-devices --include-applecare                            # Enrich every device with AppleCare coverage (4 parallel)
 ./asbmutil list-devices --include-applecare --applecare-concurrency 2  # Lower concurrency for flakier networks
 ./asbmutil list-devices --include-applecare --no-applecare-retry       # Skip the sequential second-pass retry
+./asbmutil list-devices --resume                                       # Resumable pull for large fleets; survives mid-run failures
 
 # Device Operations (using specific profile)
 ./asbmutil list-devices --profile "school-district-2"
@@ -627,6 +628,26 @@ export NO_PROXY=*.internal.example,localhost
 `HTTPS_PROXY` is preferred (all API traffic is HTTPS); `HTTP_PROXY` is honored as a fallback. `NO_PROXY` is matched against the auth host (`account.apple.com`) and the scope-specific API host (`api-business.apple.com` or `api-school.apple.com`); if every host is bypassed, the env-var proxy is skipped and the system proxy applies. Lowercase variants (`https_proxy`, etc.) work too.
 
 Proxies that require authentication should rely on system credentials (Negotiate/Kerberos via macOS); embedded `user:pass@` in the proxy URL is not currently extracted.
+
+## Resuming large device pulls
+
+For organizations with tens of thousands of devices in ABM/ASM, a full `list-devices` pull can run long enough to hit a transient timeout or network blip. Pass `--resume` to make the pull restartable:
+
+```bash
+asbmutil list-devices --resume --devices-per-page 500 > devices.json
+```
+
+With `--resume`:
+
+* After each successful page, the current cursor plus the accumulated device list are written to `~/.config/asbmutil/state/<profile>-list-devices.json`.
+* If the run fails partway, simply re-run the same command. The next invocation reads the state file, starts from the saved cursor, and appends to the in-memory collection until the pull completes.
+* On successful completion, the state file is removed so the next fresh `--resume` run starts clean.
+
+Tips for very large fleets:
+
+* Reduce `--devices-per-page` (try `500` or `250`) — smaller pages return faster and are less likely to hit the per-request timeout.
+* Combine with `--show-pagination` to see live progress on stderr.
+* `--include-applecare` runs after the device list is complete, so it doesn't participate in resume; if you need both, do the resumable pull first, then enrich the resulting JSON in a second step.
 
 ## Requirements
 

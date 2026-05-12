@@ -123,11 +123,47 @@ public actor APIClient {
         return try await send(req)
     }
 
-    public func listDevices(devicesPerPage: Int? = nil, totalLimit: Int? = nil, showPagination: Bool = false) async throws -> [DeviceAttributes] {
-        var cursor: String? = nil
+    /// Caller-supplied hooks for resuming a partially-completed pull.
+    ///
+    /// `startCursor` and `initialDevices` seed the pagination from a saved checkpoint;
+    /// `onPageComplete` runs after each successful page so the caller can persist the new cursor
+    /// and accumulated devices to a state file.
+    public struct ResumeHandle: Sendable {
+        public let startCursor: String?
+        public let initialDevices: [DeviceAttributes]
+        public let onPageComplete: @Sendable (_ cursor: String?, _ devices: [DeviceAttributes], _ pagesCompleted: Int) async throws -> Void
+
+        public init(
+            startCursor: String?,
+            initialDevices: [DeviceAttributes],
+            onPageComplete: @escaping @Sendable (String?, [DeviceAttributes], Int) async throws -> Void
+        ) {
+            self.startCursor = startCursor
+            self.initialDevices = initialDevices
+            self.onPageComplete = onPageComplete
+        }
+    }
+
+    public func listDevices(
+        devicesPerPage: Int? = nil,
+        totalLimit: Int? = nil,
+        showPagination: Bool = false,
+        resume: ResumeHandle? = nil
+    ) async throws -> [DeviceAttributes] {
+        var cursor: String? = resume?.startCursor
+        var out: [DeviceAttributes] = resume?.initialDevices ?? []
         var page = 1
-        var totalDevices = 0
-        var out: [DeviceAttributes] = []
+        var totalDevices = out.count
+
+        if let resume, !resume.initialDevices.isEmpty {
+            FileHandle.standardError.write(Data("Resuming with \(out.count) devices already collected\(cursor == nil ? " (no saved cursor — nothing left to fetch)" : "")\n".utf8))
+        }
+
+        // Resume state with no cursor means the previous run finished but the state was never
+        // cleared. Return what we have and let the caller decide whether to clear it.
+        if cursor == nil && resume != nil && !out.isEmpty {
+            return out
+        }
 
         repeat {
             let r = try await fetchOrgDevicesPage(cursor: cursor, devicesPerPage: devicesPerPage)
@@ -162,6 +198,8 @@ public actor APIClient {
             out += pageDevices.map(\.attributes)
             cursor = r.meta?.paging.nextCursor
             page += 1
+
+            try await resume?.onPageComplete(cursor, out, page - 1)
 
             // Check if we've reached our total limit
             if let totalLimit = totalLimit, totalDevices >= totalLimit {
