@@ -43,12 +43,15 @@ public actor APIClient {
     /// and system proxy applies instead.
     private static func makeSession(for scope: String) -> URLSession {
         let cfg = URLSessionConfiguration.default
+        #if canImport(Darwin)
         if let proxy = envProxyDictionary(for: scope) {
             cfg.connectionProxyDictionary = proxy
         }
+        #endif
         return URLSession(configuration: cfg)
     }
 
+    #if canImport(Darwin)
     private static func envProxyDictionary(for scope: String) -> [AnyHashable: Any]? {
         let env = ProcessInfo.processInfo.environment
         let raw = env["HTTPS_PROXY"] ?? env["https_proxy"]
@@ -94,6 +97,7 @@ public actor APIClient {
             kCFNetworkProxiesHTTPSPort as String: port,
         ]
     }
+    #endif
 
     private func makeURL(path: String, query: [URLQueryItem] = []) -> URL {
         var comp = URLComponents()
