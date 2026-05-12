@@ -5,11 +5,36 @@ private extension DeviceAttributes {
     var sortProductFamily: String { productFamily ?? "" }
     var sortProductType: String { productType ?? "" }
     var sortStatus: String { status ?? "" }
-    var sortDeviceCapacity: String { deviceCapacity ?? "" }
     var sortPurchaseSourceType: String { purchaseSourceType ?? "" }
     var sortOrderNumber: String { orderNumber ?? "" }
-    var sortOrderDateTime: String { orderDateTime ?? "" }
-    var sortUpdatedDateTime: String { updatedDateTime ?? "" }
+
+    /// Numeric rank so "64GB" < "256GB" < "1TB" instead of lexicographic order.
+    var sortCapacityRank: Double {
+        guard let raw = deviceCapacity else { return -1 }
+        let upper = raw.uppercased()
+        let digits = upper.filter { $0.isNumber || $0 == "." }
+        let value = Double(digits) ?? 0
+        if upper.contains("TB") { return value * 1024 }
+        if upper.contains("GB") { return value }
+        if upper.contains("MB") { return value / 1024 }
+        return value
+    }
+
+    var sortOrderDate: Date { Self.parseDate(orderDateTime) }
+    var sortUpdatedDate: Date { Self.parseDate(updatedDateTime) }
+
+    /// Sentinel for missing dates so empty rows sort to the bottom on ascending order.
+    private static let missingDate = Date.distantPast
+
+    private static func parseDate(_ s: String?) -> Date {
+        guard let s, !s.isEmpty else { return missingDate }
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = fractional.date(from: s) { return d }
+        let plain = ISO8601DateFormatter()
+        if let d = plain.date(from: s) { return d }
+        return missingDate
+    }
 }
 
 struct DeviceTable: View {
@@ -18,15 +43,19 @@ struct DeviceTable: View {
     @State private var sortOrder: [KeyPathComparator<DeviceAttributes>] = [
         KeyPathComparator(\.serialNumber)
     ]
-
-    private var sortedDevices: [DeviceAttributes] {
-        devices.sorted(using: sortOrder)
-    }
+    @State private var sortedDevices: [DeviceAttributes] = []
 
     var body: some View {
         Table(sortedDevices, selection: $selection, sortOrder: $sortOrder) {
             group1
             group2
+        }
+        .onAppear { sortedDevices = devices.sorted(using: sortOrder) }
+        .onChange(of: devices) { _, new in
+            sortedDevices = new.sorted(using: sortOrder)
+        }
+        .onChange(of: sortOrder) { _, new in
+            sortedDevices = devices.sorted(using: new)
         }
     }
 
@@ -60,7 +89,7 @@ struct DeviceTable: View {
 
     @TableColumnBuilder<DeviceAttributes, KeyPathComparator<DeviceAttributes>>
     private var group2: some TableColumnContent<DeviceAttributes, KeyPathComparator<DeviceAttributes>> {
-        TableColumn("Storage", value: \.sortDeviceCapacity) { (d: DeviceAttributes) in
+        TableColumn("Storage", value: \.sortCapacityRank) { (d: DeviceAttributes) in
             Text(d.deviceCapacity ?? "")
         }
         .width(min: 60, ideal: 80)
@@ -75,12 +104,12 @@ struct DeviceTable: View {
         }
         .width(min: 80, ideal: 130)
 
-        TableColumn("Order Date", value: \.sortOrderDateTime) { (d: DeviceAttributes) in
+        TableColumn("Order Date", value: \.sortOrderDate) { (d: DeviceAttributes) in
             Text(d.orderDateTime ?? "")
         }
         .width(min: 80, ideal: 120)
 
-        TableColumn("Updated", value: \.sortUpdatedDateTime) { (d: DeviceAttributes) in
+        TableColumn("Updated", value: \.sortUpdatedDate) { (d: DeviceAttributes) in
             Text(d.updatedDateTime ?? "")
         }
         .width(min: 80, ideal: 120)
