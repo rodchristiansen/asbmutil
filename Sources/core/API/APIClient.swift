@@ -8,18 +8,11 @@ import CryptoKit
 import Crypto
 #endif
 
-// --- disable system proxy for all requests ---
-private let plainSession: URLSession = {
-    let cfg = URLSessionConfiguration.default
-    cfg.connectionProxyDictionary = [:]      // disable auto-proxy / PAC
-    return URLSession(configuration: cfg)
-}()
-
 public actor APIClient {
     private var token: Token
     private let creds: Credentials
     private let profileName: String
-    private let session: URLSession = plainSession  // use proxy-free session
+    private let session: URLSession
 
     // Retry configuration
     private let maxRetries = 3
@@ -29,6 +22,7 @@ public actor APIClient {
     public init(credentials: Credentials, profileName: String? = nil) async throws {
         creds = credentials
         self.profileName = profileName ?? Keychain.getCurrentProfile()
+        self.session = Self.makeSession(for: credentials.scope)
 
         // Try to load a cached token first
         if let cached = Keychain.loadToken(profileName: self.profileName), !cached.isExpired {
@@ -38,6 +32,72 @@ public actor APIClient {
             Keychain.saveToken(token, profileName: self.profileName)
         }
     }
+
+    /// Build a URLSession that respects user-configured proxies.
+    ///
+    /// Default (no env vars set): URLSession honors the macOS system proxy / PAC.
+    /// If `HTTPS_PROXY` (or `HTTP_PROXY`) is set, that proxy is applied to all
+    /// requests on this session. `NO_PROXY` is matched against the auth host
+    /// (`account.apple.com`) and the scope-specific API host; if every host this
+    /// client reaches matches a `NO_PROXY` pattern, the env-var proxy is skipped
+    /// and system proxy applies instead.
+    private static func makeSession(for scope: String) -> URLSession {
+        let cfg = URLSessionConfiguration.default
+        #if canImport(Darwin)
+        if let proxy = envProxyDictionary(for: scope) {
+            cfg.connectionProxyDictionary = proxy
+        }
+        #endif
+        return URLSession(configuration: cfg)
+    }
+
+    #if canImport(Darwin)
+    private static func envProxyDictionary(for scope: String) -> [AnyHashable: Any]? {
+        let env = ProcessInfo.processInfo.environment
+        let raw = env["HTTPS_PROXY"] ?? env["https_proxy"]
+            ?? env["HTTP_PROXY"] ?? env["http_proxy"]
+        guard let raw, !raw.isEmpty else { return nil }
+
+        let proxyString = raw.contains("://") ? raw : "http://\(raw)"
+        guard let url = URL(string: proxyString),
+              let host = url.host, !host.isEmpty
+        else { return nil }
+
+        let bypass = (env["NO_PROXY"] ?? env["no_proxy"] ?? "")
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces).lowercased() }
+            .filter { !$0.isEmpty }
+
+        let targets = ["account.apple.com", Endpoints.base(for: scope).host ?? ""]
+            .filter { !$0.isEmpty }
+
+        func bypassed(_ host: String) -> Bool {
+            let h = host.lowercased()
+            return bypass.contains { pattern in
+                if pattern == "*" { return true }
+                // Accept curl/Docker-style `*.foo`, `.foo`, and bare `foo` as suffix patterns.
+                var p = pattern
+                if p.hasPrefix("*.") {
+                    p = String(p.dropFirst(2))
+                } else if p.hasPrefix(".") {
+                    p = String(p.dropFirst())
+                }
+                return h == p || h.hasSuffix("." + p)
+            }
+        }
+
+        if !targets.isEmpty && targets.allSatisfy(bypassed) {
+            return nil
+        }
+
+        let port = url.port ?? (url.scheme?.lowercased() == "https" ? 443 : 80)
+        return [
+            kCFNetworkProxiesHTTPSEnable as String: 1,
+            kCFNetworkProxiesHTTPSProxy as String: host,
+            kCFNetworkProxiesHTTPSPort as String: port,
+        ]
+    }
+    #endif
 
     private func makeURL(path: String, query: [URLQueryItem] = []) -> URL {
         var comp = URLComponents()
