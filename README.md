@@ -639,15 +639,15 @@ asbmutil list-devices --resume --devices-per-page 500 > devices.json
 
 With `--resume`:
 
-* After each successful page, the current cursor plus the accumulated device list are written to `~/.config/asbmutil/state/<profile>-list-devices.json`.
-* If the run fails partway, simply re-run the same command. The next invocation reads the state file, starts from the saved cursor, and appends to the in-memory collection until the pull completes.
-* On successful completion, the state file is removed so the next fresh `--resume` run starts clean.
+* After each successful page, a small checkpoint (cursor + counts) is written to `~/.config/asbmutil/state/<profile>-list-devices.json` and that page's devices are appended to a sibling `<profile>-list-devices.jsonl` spool. Both files are mode `0600` under a `0700` directory.
+* If the run fails partway, simply re-run the same command. The next invocation reads the checkpoint, replays devices from the spool, starts from the saved cursor, and continues until the pull completes.
+* On successful completion of the whole command — including any post-listing steps like AppleCare enrichment — both files are removed so the next fresh `--resume` run starts clean.
 
 Tips for very large fleets:
 
 * Reduce `--devices-per-page` (try `500` or `250`) — smaller pages return faster and are less likely to hit the per-request timeout.
 * Combine with `--show-pagination` to see live progress on stderr.
-* `--include-applecare` runs after the device list is complete, so it doesn't participate in resume; if you need both, do the resumable pull first, then enrich the resulting JSON in a second step.
+* `--include-applecare` can be combined with `--resume`: resume covers the device-listing stage, AppleCare enrichment then runs on the completed list, and the state files are only cleared once enrichment and output finish successfully.
 
 ## Requirements
 
