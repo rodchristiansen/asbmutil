@@ -26,6 +26,9 @@ struct ListDevices: AsyncParsableCommand {
     @Flag(name: .customLong("no-applecare-retry"), help: "Skip the sequential second-pass retry for AppleCare lookups that fail the parallel pass")
     var noAppleCareRetry: Bool = false
 
+    @Flag(name: .customLong("resume"), help: "Persist progress after each page and pick up from a saved cursor on subsequent runs. State is cleared on successful completion.")
+    var resume: Bool = false
+
     @Option(name: .customLong("profile"), help: "Profile name to use for credentials")
     var profileName: String?
 
@@ -59,7 +62,49 @@ struct ListDevices: AsyncParsableCommand {
             }
         }
 
-        let devices = try await client.listDevices(devicesPerPage: devicesPerPage, totalLimit: totalLimit, showPagination: showPagination)
+        let resumeHandle: APIClient.ResumeHandle?
+        let store: ResumeStore?
+        if resume {
+            let resolvedProfile = profileName ?? Keychain.getCurrentProfile()
+            let s = try ResumeStore(profile: resolvedProfile)
+            store = s
+            let prior = try s.load()
+            if let prior {
+                if let savedPerPage = prior.checkpoint.devicesPerPage, let nowPerPage = devicesPerPage, savedPerPage != nowPerPage {
+                    FileHandle.standardError.write(Data("Warning: resuming with devicesPerPage=\(nowPerPage) but saved state used \(savedPerPage). Apple's cursor should still work.\n".utf8))
+                }
+                FileHandle.standardError.write(Data("Resuming from \(s.statePath) — \(prior.devices.count) devices, \(prior.checkpoint.pagesCompleted) pages completed.\n".utf8))
+            } else {
+                FileHandle.standardError.write(Data("No prior progress; starting fresh and saving to \(s.statePath) after each page.\n".utf8))
+            }
+            let perPage = devicesPerPage
+            let limit = totalLimit
+            resumeHandle = APIClient.ResumeHandle(
+                startCursor: prior?.checkpoint.cursor,
+                initialDevices: prior?.devices ?? [],
+                initialPagesCompleted: prior?.checkpoint.pagesCompleted ?? 0
+            ) { cursor, newPageDevices, totalDevices, pagesCompleted in
+                let checkpoint = ListDevicesCheckpoint(
+                    profile: resolvedProfile,
+                    cursor: cursor,
+                    devicesPerPage: perPage,
+                    totalLimit: limit,
+                    pagesCompleted: pagesCompleted,
+                    devicesCount: totalDevices
+                )
+                try s.appendPage(checkpoint: checkpoint, newDevices: newPageDevices)
+            }
+        } else {
+            store = nil
+            resumeHandle = nil
+        }
+
+        let devices = try await client.listDevices(
+            devicesPerPage: devicesPerPage,
+            totalLimit: totalLimit,
+            showPagination: showPagination,
+            resume: resumeHandle
+        )
 
         let encoder = JSONEncoder()
         if includeAppleCare {
@@ -72,6 +117,13 @@ struct ListDevices: AsyncParsableCommand {
             print(String(decoding: try encoder.encode(enriched), as: UTF8.self))
         } else {
             print(String(decoding: try encoder.encode(devices), as: UTF8.self))
+        }
+
+        // Clear resume state only after the whole command (including AppleCare enrichment and
+        // final output) succeeds — otherwise a crash during enrichment leaves the user without
+        // the device list and without a way to resume.
+        if resume {
+            try store?.clear()
         }
     }
 }
