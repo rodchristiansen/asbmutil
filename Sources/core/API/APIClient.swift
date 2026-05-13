@@ -123,16 +123,59 @@ public actor APIClient {
         return try await send(req)
     }
 
-    public func listDevices(devicesPerPage: Int? = nil, totalLimit: Int? = nil, showPagination: Bool = false) async throws -> [DeviceAttributes] {
-        var cursor: String? = nil
-        var page = 1
-        var totalDevices = 0
-        var out: [DeviceAttributes] = []
+    /// Caller-supplied hooks for resuming a partially-completed pull.
+    ///
+    /// `startCursor` and `initialDevices` seed the pagination from a saved checkpoint and
+    /// `initialPagesCompleted` carries the cumulative page count forward so callbacks see a
+    /// monotonically increasing `pagesCompleted` across resumes. `onPageComplete` runs after
+    /// each successful page; it receives only the new page's devices (so the caller can append
+    /// to a spool rather than rewriting the full list) along with the running total.
+    public struct ResumeHandle: Sendable {
+        public let startCursor: String?
+        public let initialDevices: [DeviceAttributes]
+        public let initialPagesCompleted: Int
+        public let onPageComplete: @Sendable (_ cursor: String?, _ newPageDevices: [DeviceAttributes], _ totalDevices: Int, _ pagesCompleted: Int) async throws -> Void
+
+        public init(
+            startCursor: String?,
+            initialDevices: [DeviceAttributes],
+            initialPagesCompleted: Int = 0,
+            onPageComplete: @escaping @Sendable (String?, [DeviceAttributes], Int, Int) async throws -> Void
+        ) {
+            self.startCursor = startCursor
+            self.initialDevices = initialDevices
+            self.initialPagesCompleted = initialPagesCompleted
+            self.onPageComplete = onPageComplete
+        }
+    }
+
+    public func listDevices(
+        devicesPerPage: Int? = nil,
+        totalLimit: Int? = nil,
+        showPagination: Bool = false,
+        resume: ResumeHandle? = nil
+    ) async throws -> [DeviceAttributes] {
+        var cursor: String? = resume?.startCursor
+        var out: [DeviceAttributes] = resume?.initialDevices ?? []
+        let initialPagesCompleted = resume?.initialPagesCompleted ?? 0
+        var pagesThisRun = 0
+
+        // If a previous run already collected enough devices for our limit, return immediately
+        // before issuing any request — the math below would otherwise underflow.
+        if let totalLimit, out.count >= totalLimit {
+            return Array(out.prefix(totalLimit))
+        }
+
+        // Resume state with no cursor means the previous run finished but the state was never
+        // cleared. Return what we have and let the caller decide whether to clear it.
+        if cursor == nil && resume != nil && !out.isEmpty {
+            return out
+        }
 
         repeat {
             let r = try await fetchOrgDevicesPage(cursor: cursor, devicesPerPage: devicesPerPage)
             let pageDeviceCount = r.data.count
-            let remainingNeeded = totalLimit.map { $0 - totalDevices }
+            let remainingNeeded = totalLimit.map { max(0, $0 - out.count) }
 
             // If we have a total limit, only take what we need
             let devicesToTake = if let remaining = remainingNeeded {
@@ -142,12 +185,16 @@ public actor APIClient {
             }
 
             let pageDevices = Array(r.data.prefix(devicesToTake))
-            totalDevices += devicesToTake
+            let newAttributes = pageDevices.map(\.attributes)
+            out += newAttributes
+            cursor = r.meta?.paging.nextCursor
+            pagesThisRun += 1
+            let cumulativePages = initialPagesCompleted + pagesThisRun
 
             if showPagination {
                 let pageSizeInfo = devicesPerPage.map { " (devices per page: \($0))" } ?? ""
                 let limitInfo = totalLimit.map { " [limit: \($0)]" } ?? ""
-                FileHandle.standardError.write(Data("Page \(page): retrieved \(devicesToTake)/\(pageDeviceCount) devices\(pageSizeInfo), total so far: \(totalDevices)\(limitInfo)\n".utf8))
+                FileHandle.standardError.write(Data("Page \(cumulativePages): retrieved \(devicesToTake)/\(pageDeviceCount) devices\(pageSizeInfo), total so far: \(out.count)\(limitInfo)\n".utf8))
 
                 if let nextCursor = r.meta?.paging.nextCursor {
                     FileHandle.standardError.write(Data("  Next cursor: \(String(nextCursor.prefix(20)))...\n".utf8))
@@ -156,15 +203,13 @@ public actor APIClient {
                 }
             } else {
                 let pageSizeInfo = devicesPerPage.map { " (devices per page: \($0))" } ?? ""
-                FileHandle.standardError.write(Data("Page \(page): found \(devicesToTake) devices\(pageSizeInfo), total so far: \(totalDevices)\n".utf8))
+                FileHandle.standardError.write(Data("Page \(cumulativePages): found \(devicesToTake) devices\(pageSizeInfo), total so far: \(out.count)\n".utf8))
             }
 
-            out += pageDevices.map(\.attributes)
-            cursor = r.meta?.paging.nextCursor
-            page += 1
+            try await resume?.onPageComplete(cursor, newAttributes, out.count, cumulativePages)
 
             // Check if we've reached our total limit
-            if let totalLimit = totalLimit, totalDevices >= totalLimit {
+            if let totalLimit = totalLimit, out.count >= totalLimit {
                 if showPagination {
                     FileHandle.standardError.write(Data("Reached total limit of \(totalLimit) devices\n".utf8))
                 }
@@ -179,7 +224,8 @@ public actor APIClient {
 
         if showPagination {
             let limitStatus = totalLimit.map { " (limited to \($0))" } ?? ""
-            FileHandle.standardError.write(Data("Pagination complete: \(totalDevices) total devices across \(page - 1) pages\(limitStatus)\n".utf8))
+            let totalPages = initialPagesCompleted + pagesThisRun
+            FileHandle.standardError.write(Data("Pagination complete: \(out.count) total devices across \(totalPages) pages\(limitStatus)\n".utf8))
         }
         return out
     }
