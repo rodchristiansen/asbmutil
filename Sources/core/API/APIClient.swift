@@ -484,6 +484,121 @@ public actor APIClient {
         return response.data.attributes.status
     }
 
+    /// A device activity is in a terminal state once Apple stops processing it.
+    public static func isTerminalActivityStatus(_ status: String) -> Bool {
+        switch status.uppercased() {
+        case "COMPLETE", "COMPLETED", "FAILED", "ERROR", "STOPPED":
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Poll an activity until it reaches a terminal state or the timeout elapses.
+    ///
+    /// Returns the final status string, or `"TIMEOUT"` if the deadline passed before the
+    /// activity settled. `onPoll` fires after each status read so callers can surface progress.
+    ///
+    /// Both `intervalSeconds` and `timeoutSeconds` must be positive: a zero interval would
+    /// busy-loop against the API and a negative one would trap on the `UInt64` sleep conversion.
+    public func waitForActivityTerminal(
+        id: String,
+        intervalSeconds: Int,
+        timeoutSeconds: Int,
+        onPoll: (@Sendable (String) -> Void)? = nil
+    ) async throws -> String {
+        guard intervalSeconds >= 1 else {
+            throw RuntimeError("Poll interval must be at least 1 second (got \(intervalSeconds)).")
+        }
+        guard timeoutSeconds >= 1 else {
+            throw RuntimeError("Poll timeout must be at least 1 second (got \(timeoutSeconds)).")
+        }
+        let deadline = Date().addingTimeInterval(TimeInterval(timeoutSeconds))
+        while Date() < deadline {
+            let status = try await activityStatus(id: id)
+            onPoll?(status)
+            if Self.isTerminalActivityStatus(status) {
+                return status
+            }
+            try await Task.sleep(nanoseconds: UInt64(intervalSeconds) * 1_000_000_000)
+        }
+        return "TIMEOUT"
+    }
+
+    /// Re-query each serial's assigned MDM server and reconcile it against the expected end state.
+    ///
+    /// `expected: .assigned(serverId)` confirms each device now reports that server; `.unassigned(serverId)`
+    /// confirms each device is no longer on that server (it may be unassigned or moved elsewhere). Serials
+    /// whose assignment can't be read (after retries) land in `errored` rather than being reported as a
+    /// mismatch. Lookups fan out with bounded concurrency; input order is preserved per bucket.
+    public func confirmAssignment(
+        serials: [String],
+        expected: AssignmentExpectation,
+        concurrency: Int = 4
+    ) async -> AssignmentReconciliation {
+        guard !serials.isEmpty else { return AssignmentReconciliation(asExpected: [], mismatched: [], errored: []) }
+        let cap = max(1, min(concurrency, 32))
+        let total = serials.count
+
+        enum Outcome: Sendable {
+            case assignedServer(String?)   // current server id, nil if unassigned
+            case errored(String)
+        }
+
+        var outcomeBySerial: [String: Outcome] = [:]
+
+        await withTaskGroup(of: (String, Outcome).self) { group in
+            var index = 0
+
+            func enqueue(_ serial: String) {
+                group.addTask { [self] in
+                    do {
+                        let response = try await self.getAssignedMdmRaw(deviceId: serial)
+                        return (serial, .assignedServer(response.data?.id))
+                    } catch {
+                        return (serial, .errored(error.localizedDescription))
+                    }
+                }
+            }
+
+            while index < cap && index < total {
+                enqueue(serials[index])
+                index += 1
+            }
+            while let (serial, outcome) = await group.next() {
+                outcomeBySerial[serial] = outcome
+                if index < total {
+                    enqueue(serials[index])
+                    index += 1
+                }
+            }
+        }
+
+        var asExpected: [String] = []
+        var mismatched: [(serial: String, assignedTo: String?)] = []
+        var errored: [(serial: String, message: String)] = []
+        for serial in serials {
+            switch outcomeBySerial[serial] {
+            case .assignedServer(let current):
+                let matches: Bool
+                switch expected {
+                case .assigned(let serverId): matches = (current == serverId)
+                case .unassigned(let serverId): matches = (current != serverId)
+                }
+                if matches {
+                    asExpected.append(serial)
+                } else {
+                    mismatched.append((serial, current))
+                }
+            case .errored(let message):
+                errored.append((serial, message))
+            case nil:
+                errored.append((serial, "no result"))
+            }
+        }
+        return AssignmentReconciliation(asExpected: asExpected, mismatched: mismatched, errored: errored)
+    }
+
     public func listMdmServers() async throws -> [MdmServerWithId] {
         let response: MdmServersResponse = try await send(
             Request(

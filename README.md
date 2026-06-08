@@ -180,6 +180,7 @@ For organizations managing multiple ABM instances, you can create named profiles
 ./asbmutil assign --serials P8R2K47NF5X9,Q7M5V83WH4L2 --mdm "Intune"
 ./asbmutil assign --csv-file devices.csv --mdm "Intune"
 ./asbmutil assign --csv-file devices.csv --mdm "Intune" --skip-verify   # Submit as-is, no pre-flight 404 check
+./asbmutil assign --serials P8R2K47NF5X9 --mdm "Intune" --confirm       # Poll to completion and verify it landed
 ./asbmutil unassign --serials P8R2K47NF5X9,Q7M5V83WH4L2 --mdm "MicroMDM"
 ./asbmutil unassign --csv-file devices.csv --mdm "MicroMDM"
 
@@ -628,6 +629,18 @@ The verification adds one lightweight API call per serial (fanned out with bound
 ```
 
 The JSON activity result is still printed to stdout; verification diagnostics go to stderr, so piping to `jq` is unaffected.
+
+### Post-assignment confirmation
+
+Pre-flight verification catches serials that don't exist before you submit, but the activity itself is still fire-and-forget — `IN_PROGRESS` followed by a `COMPLETED` batch status doesn't by itself prove each device landed on the intended MDM. Pass `--confirm` to close that loop:
+
+```bash
+./asbmutil assign --serials P8R2K47NF5X9 --mdm "Intune" --confirm
+```
+
+With `--confirm`, after submitting, `asbmutil` polls the activity until it reaches a terminal state, then re-queries each device's assigned server and reconciles it against the intended end state (on the target MDM for `assign`, off it for `unassign`). It reports how many devices reached the expected state and lists any that didn't, then exits non-zero if any device is unaccounted for — so a script can treat a partial assignment as a failure.
+
+Tune the polling with `--confirm-interval` (seconds between polls, default 10) and `--confirm-timeout` (max seconds to wait, default 240). As with verification, the activity JSON goes to stdout and all confirmation output goes to stderr.
 
 ## Network proxy
 

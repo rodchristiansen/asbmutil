@@ -161,6 +161,53 @@ private func verifiedSerials(_ serials: [String], client: APIClient, operation: 
     return result.found
 }
 
+/// Poll the activity to a terminal state, then reconcile each serial's actual assignment against
+/// the intended end state. Reports to stderr (stdout is reserved for the activity JSON). Throws if
+/// any serial didn't land as expected, so callers exit non-zero — useful in scripts.
+private func confirmActivity(
+    _ activity: ActivityDetails,
+    serials: [String],
+    expected: AssignmentExpectation,
+    client: APIClient,
+    interval: Int,
+    timeout: Int
+) async throws {
+    FileHandle.standardError.write(Data("\nConfirming activity \(activity.id) (polling up to \(timeout)s)...\n".utf8))
+    let finalStatus = try await client.waitForActivityTerminal(
+        id: activity.id,
+        intervalSeconds: interval,
+        timeoutSeconds: timeout
+    ) { status in
+        FileHandle.standardError.write(Data("  poll: \(status)\n".utf8))
+    }
+
+    if finalStatus == "TIMEOUT" {
+        throw RuntimeError("Activity \(activity.id) did not reach a terminal state within \(timeout)s; cannot confirm. Re-check later with: asbmutil batch-status \(activity.id)")
+    }
+    FileHandle.standardError.write(Data("Activity terminal status: \(finalStatus)\n".utf8))
+
+    FileHandle.standardError.write(Data("Re-querying assignment for \(serials.count) device(s)...\n".utf8))
+    let result = await client.confirmAssignment(serials: serials, expected: expected)
+
+    FileHandle.standardError.write(Data("\nConfirmed as expected (\(result.asExpected.count)/\(serials.count)).\n".utf8))
+    if !result.mismatched.isEmpty {
+        FileHandle.standardError.write(Data("\nNot in expected state (\(result.mismatched.count)):\n".utf8))
+        for m in result.mismatched {
+            FileHandle.standardError.write(Data("  \(m.serial): now \(m.assignedTo.map { "on \($0)" } ?? "unassigned")\n".utf8))
+        }
+    }
+    if !result.errored.isEmpty {
+        FileHandle.standardError.write(Data("\nCould not confirm (\(result.errored.count)):\n".utf8))
+        for e in result.errored {
+            FileHandle.standardError.write(Data("  \(e.serial): \(e.message)\n".utf8))
+        }
+    }
+
+    if !result.mismatched.isEmpty || !result.errored.isEmpty {
+        throw RuntimeError("Confirmation incomplete: \(result.asExpected.count) of \(serials.count) device(s) reached the expected state.")
+    }
+}
+
 struct Assign: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "assign",
@@ -178,12 +225,29 @@ struct Assign: AsyncParsableCommand {
     @Flag(name: .customLong("skip-verify"), help: "Skip the pre-flight check that each serial exists before submitting. By default, serials returning HTTP 404 (e.g. not yet registered by the reseller) are reported and excluded.")
     var skipVerify: Bool = false
 
+    @Flag(name: .customLong("confirm"), help: "After submitting, poll the activity to completion and re-query each device to confirm it actually landed on the target MDM. Exits non-zero if any device didn't.")
+    var confirm: Bool = false
+
+    @Option(name: .customLong("confirm-interval"), help: "Seconds between confirmation polls (default: 10)")
+    var confirmInterval: Int = 10
+
+    @Option(name: .customLong("confirm-timeout"), help: "Max seconds to poll for completion when --confirm is set (default: 240)")
+    var confirmTimeout: Int = 240
+
     @Option(name: .customLong("profile"), help: "Profile name to use for credentials")
     var profileName: String?
 
     func validate() throws {
         guard (serials != nil) != (csvFile != nil) else {
             throw ValidationError("Must specify either --serials or --csv-file, but not both")
+        }
+        if confirm {
+            guard confirmInterval >= 1 else {
+                throw ValidationError("--confirm-interval must be at least 1 second")
+            }
+            guard confirmTimeout >= 1 else {
+                throw ValidationError("--confirm-timeout must be at least 1 second")
+            }
         }
     }
 
@@ -213,6 +277,17 @@ struct Assign: AsyncParsableCommand {
             serviceId: serviceId
         )
         print(String(decoding: try JSONEncoder().encode(activityDetails), as: UTF8.self))
+
+        if confirm {
+            try await confirmActivity(
+                activityDetails,
+                serials: toSubmit,
+                expected: .assigned(serverId: serviceId),
+                client: client,
+                interval: confirmInterval,
+                timeout: confirmTimeout
+            )
+        }
     }
 }
 
@@ -233,12 +308,29 @@ struct Unassign: AsyncParsableCommand {
     @Flag(name: .customLong("skip-verify"), help: "Skip the pre-flight check that each serial exists before submitting. By default, serials returning HTTP 404 (e.g. not yet registered by the reseller) are reported and excluded.")
     var skipVerify: Bool = false
 
+    @Flag(name: .customLong("confirm"), help: "After submitting, poll the activity to completion and re-query each device to confirm it is no longer on the target MDM. Exits non-zero if any device still is.")
+    var confirm: Bool = false
+
+    @Option(name: .customLong("confirm-interval"), help: "Seconds between confirmation polls (default: 10)")
+    var confirmInterval: Int = 10
+
+    @Option(name: .customLong("confirm-timeout"), help: "Max seconds to poll for completion when --confirm is set (default: 240)")
+    var confirmTimeout: Int = 240
+
     @Option(name: .customLong("profile"), help: "Profile name to use for credentials")
     var profileName: String?
 
     func validate() throws {
         guard (serials != nil) != (csvFile != nil) else {
             throw ValidationError("Must specify either --serials or --csv-file, but not both")
+        }
+        if confirm {
+            guard confirmInterval >= 1 else {
+                throw ValidationError("--confirm-interval must be at least 1 second")
+            }
+            guard confirmTimeout >= 1 else {
+                throw ValidationError("--confirm-timeout must be at least 1 second")
+            }
         }
     }
 
@@ -268,6 +360,17 @@ struct Unassign: AsyncParsableCommand {
             serviceId: serviceId
         )
         print(String(decoding: try JSONEncoder().encode(activityDetails), as: UTF8.self))
+
+        if confirm {
+            try await confirmActivity(
+                activityDetails,
+                serials: toSubmit,
+                expected: .unassigned(serverId: serviceId),
+                client: client,
+                interval: confirmInterval,
+                timeout: confirmTimeout
+            )
+        }
     }
 }
 
@@ -290,20 +393,27 @@ struct BatchStatus: AsyncParsableCommand {
     @Option(name: .customLong("profile"), help: "Profile name to use for credentials")
     var profileName: String?
 
+    func validate() throws {
+        if poll {
+            guard interval >= 1 else {
+                throw ValidationError("--interval must be at least 1 second")
+            }
+            guard timeout >= 1 else {
+                throw ValidationError("--timeout must be at least 1 second")
+            }
+        }
+    }
+
     func run() async throws {
         let client = try await APIClient(credentials: Creds.load(profileName: profileName), profileName: profileName)
 
         if poll {
-            let deadline = Date().addingTimeInterval(TimeInterval(timeout))
-            var finalStatus = "TIMEOUT"
-            while Date() < deadline {
-                let status = try await client.activityStatus(id: id)
+            let finalStatus = try await client.waitForActivityTerminal(
+                id: id,
+                intervalSeconds: interval,
+                timeoutSeconds: timeout
+            ) { status in
                 FileHandle.standardError.write(Data("poll: \(status)\n".utf8))
-                if status == "COMPLETE" || status == "COMPLETED" || status == "FAILED" || status == "ERROR" {
-                    finalStatus = status
-                    break
-                }
-                try await Task.sleep(nanoseconds: UInt64(interval) * 1_000_000_000)
             }
             print(finalStatus)
         } else {

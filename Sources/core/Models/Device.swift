@@ -307,6 +307,33 @@ public struct DeviceVerification: Sendable {
     }
 }
 
+// MARK: - Post-assignment Confirmation
+
+/// The end state a confirmation check expects each serial to be in, carrying the target server id.
+public enum AssignmentExpectation: Sendable {
+    /// Device should now report this server as its assigned MDM (after an assign).
+    case assigned(serverId: String)
+    /// Device should no longer be on this server (after an unassign).
+    case unassigned(serverId: String)
+}
+
+/// Outcome of re-querying each serial's assigned MDM after an activity reached a terminal state.
+///
+/// `asExpected` are serials whose current assignment matches the intended end state. `mismatched`
+/// are serials that settled in a different state than intended (`assignedTo` is the server id they
+/// currently report, or nil if unassigned). `errored` are serials whose assignment couldn't be read.
+public struct AssignmentReconciliation: Sendable {
+    public let asExpected: [String]
+    public let mismatched: [(serial: String, assignedTo: String?)]
+    public let errored: [(serial: String, message: String)]
+
+    public init(asExpected: [String], mismatched: [(serial: String, assignedTo: String?)], errored: [(serial: String, message: String)]) {
+        self.asExpected = asExpected
+        self.mismatched = mismatched
+        self.errored = errored
+    }
+}
+
 // MARK: - Activity Details
 
 public struct ActivityDetails: Codable, Sendable, Identifiable {
