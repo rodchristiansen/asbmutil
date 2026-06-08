@@ -488,12 +488,21 @@ public actor APIClient {
     ///
     /// Returns the final status string, or `"TIMEOUT"` if the deadline passed before the
     /// activity settled. `onPoll` fires after each status read so callers can surface progress.
+    ///
+    /// Both `intervalSeconds` and `timeoutSeconds` must be positive: a zero interval would
+    /// busy-loop against the API and a negative one would trap on the `UInt64` sleep conversion.
     public func waitForActivityTerminal(
         id: String,
         intervalSeconds: Int,
         timeoutSeconds: Int,
         onPoll: (@Sendable (String) -> Void)? = nil
     ) async throws -> String {
+        guard intervalSeconds >= 1 else {
+            throw RuntimeError("Poll interval must be at least 1 second (got \(intervalSeconds)).")
+        }
+        guard timeoutSeconds >= 1 else {
+            throw RuntimeError("Poll timeout must be at least 1 second (got \(timeoutSeconds)).")
+        }
         let deadline = Date().addingTimeInterval(TimeInterval(timeoutSeconds))
         while Date() < deadline {
             let status = try await activityStatus(id: id)
