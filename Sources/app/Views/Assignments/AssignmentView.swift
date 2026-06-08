@@ -105,6 +105,10 @@ struct AssignmentView: View {
             ))
             .font(.caption)
             .help("Checks each serial against School/Business Manager first. Serials that don't exist (e.g. not yet registered by the reseller) are reported and excluded rather than silently no-op'd.")
+
+            Toggle("Confirm assignment after submitting", isOn: $viewModel.confirmAfterSubmit)
+                .font(.caption)
+                .help("After submitting, waits for the activity to finish and re-queries each device to confirm it actually reached the intended MDM. Slower, since it polls until the activity completes.")
         }
     }
 
@@ -162,6 +166,37 @@ struct AssignmentView: View {
                 }
                 LabeledContent("Status", value: result.status)
                 LabeledContent("Devices", value: "\(result.deviceCount)")
+            }
+        }
+
+        if viewModel.didConfirm {
+            GroupBox("Confirmation") {
+                VStack(alignment: .leading, spacing: 6) {
+                    if let status = viewModel.confirmStatus {
+                        LabeledContent("Activity", value: status)
+                    }
+                    if viewModel.confirmStatus == "TIMEOUT" {
+                        Label("Activity didn't finish in time — couldn't confirm end state.", systemImage: "clock.badge.exclamationmark")
+                            .foregroundStyle(.orange).font(.caption)
+                    } else {
+                        let total = viewModel.confirmedCount + viewModel.confirmMismatched.count + viewModel.confirmErrored.count
+                        Label("\(viewModel.confirmedCount)/\(total) device(s) confirmed in the expected state",
+                              systemImage: viewModel.confirmMismatched.isEmpty && viewModel.confirmErrored.isEmpty ? "checkmark.circle" : "exclamationmark.circle")
+                            .foregroundStyle(viewModel.confirmMismatched.isEmpty && viewModel.confirmErrored.isEmpty ? .green : .orange)
+                            .font(.caption.weight(.medium))
+                        if !viewModel.confirmMismatched.isEmpty {
+                            Text("Not in expected state:").font(.caption2).foregroundStyle(.secondary)
+                            Text(viewModel.confirmMismatched.joined(separator: "\n"))
+                                .font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
+                        }
+                        if !viewModel.confirmErrored.isEmpty {
+                            Text("Could not confirm:").font(.caption2).foregroundStyle(.secondary)
+                            Text(viewModel.confirmErrored.joined(separator: "\n"))
+                                .font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }
