@@ -11,7 +11,7 @@ jobs:
     runs-on: macos-26
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: Select Xcode 26 (Icon Composer support)
       run: |
@@ -48,7 +48,7 @@ jobs:
       image: swift:6.0-focal
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: Write Version.swift
       env:

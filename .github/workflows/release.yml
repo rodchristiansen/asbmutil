@@ -26,7 +26,7 @@ jobs:
     runs-on: macos-26
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: Select Xcode 26 (Icon Composer support)
       run: |
@@ -47,19 +47,19 @@ jobs:
         .build/release/asbmutil --help
 
     - name: Upload .pkg
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: ASBMUtil-${{ needs.version.outputs.version }}-pkg
         path: dist/ASBMUtil-${{ needs.version.outputs.version }}.pkg
 
     - name: Upload .dmg
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: ASBMUtil-${{ needs.version.outputs.version }}-dmg
         path: dist/ASBMUtil-${{ needs.version.outputs.version }}.dmg
 
     - name: Upload CLI zip
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: asbmutil-${{ needs.version.outputs.version }}-macos-arm64
         path: dist/asbmutil-${{ needs.version.outputs.version }}-macos-arm64.zip
@@ -71,7 +71,7 @@ jobs:
       image: swift:6.0-focal
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
 
     - name: Write Version.swift
       env:
@@ -101,7 +101,7 @@ jobs:
         tar czf "asbmutil-${VERSION}-linux-amd64.tar.gz" -C .build/release asbmutil
 
     - name: Upload artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: asbmutil-${{ needs.version.outputs.version }}-linux-amd64
         path: asbmutil-${{ needs.version.outputs.version }}-linux-amd64.tar.gz
@@ -111,17 +111,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout code
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         fetch-depth: 0
 
     - name: Download all artifacts
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         path: artifacts
 
     - name: Create Release
-      uses: softprops/action-gh-release@v2
+      uses: softprops/action-gh-release@v3
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
