@@ -25,6 +25,19 @@ final class AssignmentViewModel {
     /// Serials whose existence couldn't be determined during the last run — excluded from submission.
     var erroredSerials: [String] = []
 
+    /// After submitting, poll the activity and re-query each device to confirm the end state.
+    var confirmAfterSubmit = false
+    /// Whether a confirmation pass ran and produced results to show.
+    var didConfirm = false
+    /// Human-readable terminal status of the confirmed activity (e.g. COMPLETED, TIMEOUT).
+    var confirmStatus: String?
+    /// Count of devices confirmed in the expected end state.
+    var confirmedCount = 0
+    /// Serials that settled in a different state than intended.
+    var confirmMismatched: [String] = []
+    /// Serials whose final assignment couldn't be read.
+    var confirmErrored: [String] = []
+
     var serialNumbers: [String] {
         if !importedSerials.isEmpty {
             return importedSerials
@@ -54,6 +67,11 @@ final class AssignmentViewModel {
         result = nil
         notFoundSerials = []
         erroredSerials = []
+        didConfirm = false
+        confirmStatus = nil
+        confirmedCount = 0
+        confirmMismatched = []
+        confirmErrored = []
 
         do {
             let serviceId = try await client.getMdmServerIdByName(selectedMdmName)
@@ -77,11 +95,32 @@ final class AssignmentViewModel {
                 toSubmit = verification.found
             }
 
-            result = try await client.createDeviceActivity(
+            let activity = try await client.createDeviceActivity(
                 activityType: activityType,
                 serials: toSubmit,
                 serviceId: serviceId
             )
+            result = activity
+
+            // Optionally poll to completion and reconcile each device's actual end state.
+            if confirmAfterSubmit {
+                let status = try await client.waitForActivityTerminal(
+                    id: activity.id,
+                    intervalSeconds: 10,
+                    timeoutSeconds: 240
+                )
+                confirmStatus = status
+                if status != "TIMEOUT" {
+                    let expected: AssignmentExpectation = mode == .assign
+                        ? .assigned(serverId: serviceId)
+                        : .unassigned(serverId: serviceId)
+                    let reconciliation = await client.confirmAssignment(serials: toSubmit, expected: expected)
+                    confirmedCount = reconciliation.asExpected.count
+                    confirmMismatched = reconciliation.mismatched.map { "\($0.serial): now \($0.assignedTo.map { "on \($0)" } ?? "unassigned")" }
+                    confirmErrored = reconciliation.errored.map { "\($0.serial): \($0.message)" }
+                }
+                didConfirm = true
+            }
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -96,6 +135,11 @@ final class AssignmentViewModel {
         errorMessage = nil
         notFoundSerials = []
         erroredSerials = []
+        didConfirm = false
+        confirmStatus = nil
+        confirmedCount = 0
+        confirmMismatched = []
+        confirmErrored = []
     }
 
     func importCSV(from url: URL) {
