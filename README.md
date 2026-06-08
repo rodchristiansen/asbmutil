@@ -179,6 +179,7 @@ For organizations managing multiple ABM instances, you can create named profiles
 # Assignment Operations
 ./asbmutil assign --serials P8R2K47NF5X9,Q7M5V83WH4L2 --mdm "Intune"
 ./asbmutil assign --csv-file devices.csv --mdm "Intune"
+./asbmutil assign --csv-file devices.csv --mdm "Intune" --skip-verify   # Submit as-is, no pre-flight 404 check
 ./asbmutil unassign --serials P8R2K47NF5X9,Q7M5V83WH4L2 --mdm "MicroMDM"
 ./asbmutil unassign --csv-file devices.csv --mdm "MicroMDM"
 
@@ -613,6 +614,20 @@ Both modes use efficient server-side device listing (4-5 API calls regardless of
   ]
 }
 ```
+
+### Pre-flight serial verification
+
+Apple's `orgDeviceActivities` endpoint accepts any serial you send it — including serials that aren't in your School/Business Manager account yet (e.g. a reseller issued a shipment notice but hasn't registered the device) or that are simply mistyped. The activity comes back `IN_PROGRESS` and `batch-status` later reports `COMPLETED`, even though nothing was assigned because the device never existed.
+
+To catch this, `assign` and `unassign` verify every serial against `GET /v1/orgDevices/{id}` before submitting. Serials that return HTTP 404 are reported on stderr and excluded; only confirmed devices are sent on for the activity. If none of the serials are valid, the command aborts without creating an activity.
+
+The verification adds one lightweight API call per serial (fanned out with bounded concurrency). To skip it and submit serials as-is — restoring the old behavior — pass `--skip-verify`:
+
+```bash
+./asbmutil assign --csv-file devices.csv --mdm "Intune" --skip-verify
+```
+
+The JSON activity result is still printed to stdout; verification diagnostics go to stderr, so piping to `jq` is unaffected.
 
 ## Network proxy
 

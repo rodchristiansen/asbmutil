@@ -128,6 +128,39 @@ struct ListDevices: AsyncParsableCommand {
     }
 }
 
+/// Pre-flight serials through `GET /v1/orgDevices/{id}` and return the ones safe to submit.
+///
+/// Apple's `orgDeviceActivities` endpoint accepts unknown serials and reports the activity as
+/// `COMPLETED` even when nothing happened, so a not-yet-registered or mistyped serial silently
+/// no-ops. This filters those out: not-found (HTTP 404) and unverifiable serials are reported to
+/// stderr and excluded, valid serials are returned. Throws if none survive. Diagnostics go to
+/// stderr so the JSON result on stdout stays machine-parseable.
+private func verifiedSerials(_ serials: [String], client: APIClient, operation: String) async throws -> [String] {
+    FileHandle.standardError.write(Data("Verifying \(serials.count) serial(s) exist before \(operation)...\n".utf8))
+    let result = await client.verifyDevices(serials: serials)
+
+    if !result.notFound.isEmpty {
+        FileHandle.standardError.write(Data("\nNot found (\(result.notFound.count)) — skipped:\n".utf8))
+        for s in result.notFound {
+            FileHandle.standardError.write(Data("  \(s)\n".utf8))
+        }
+        FileHandle.standardError.write(Data("These returned HTTP 404 — not yet registered by the reseller, or mistyped.\n".utf8))
+    }
+    if !result.errored.isEmpty {
+        FileHandle.standardError.write(Data("\nCould not verify (\(result.errored.count)) — skipped:\n".utf8))
+        for e in result.errored {
+            FileHandle.standardError.write(Data("  \(e.serial): \(e.message)\n".utf8))
+        }
+    }
+
+    guard !result.found.isEmpty else {
+        throw RuntimeError("No valid devices to \(operation): all \(serials.count) serial(s) were not found or could not be verified. Re-run with --skip-verify to submit anyway.")
+    }
+
+    FileHandle.standardError.write(Data("\nProceeding to \(operation) \(result.found.count) of \(serials.count) serial(s).\n".utf8))
+    return result.found
+}
+
 struct Assign: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "assign",
@@ -141,6 +174,9 @@ struct Assign: AsyncParsableCommand {
 
     @Option(name: .customLong("mdm"), help: "MDM server name")
     var mdmName: String
+
+    @Flag(name: .customLong("skip-verify"), help: "Skip the pre-flight check that each serial exists before submitting. By default, serials returning HTTP 404 (e.g. not yet registered by the reseller) are reported and excluded.")
+    var skipVerify: Bool = false
 
     @Option(name: .customLong("profile"), help: "Profile name to use for credentials")
     var profileName: String?
@@ -167,9 +203,13 @@ struct Assign: AsyncParsableCommand {
             throw ValidationError("No serial numbers provided")
         }
 
+        let toSubmit = skipVerify
+            ? serialNumbers
+            : try await verifiedSerials(serialNumbers, client: client, operation: "assign")
+
         let activityDetails = try await client.createDeviceActivity(
             activityType: "ASSIGN_DEVICES",
-            serials: serialNumbers,
+            serials: toSubmit,
             serviceId: serviceId
         )
         print(String(decoding: try JSONEncoder().encode(activityDetails), as: UTF8.self))
@@ -190,6 +230,9 @@ struct Unassign: AsyncParsableCommand {
     @Option(name: .customLong("mdm"), help: "MDM server name")
     var mdmName: String
 
+    @Flag(name: .customLong("skip-verify"), help: "Skip the pre-flight check that each serial exists before submitting. By default, serials returning HTTP 404 (e.g. not yet registered by the reseller) are reported and excluded.")
+    var skipVerify: Bool = false
+
     @Option(name: .customLong("profile"), help: "Profile name to use for credentials")
     var profileName: String?
 
@@ -215,9 +258,13 @@ struct Unassign: AsyncParsableCommand {
             throw ValidationError("No serial numbers provided")
         }
 
+        let toSubmit = skipVerify
+            ? serialNumbers
+            : try await verifiedSerials(serialNumbers, client: client, operation: "unassign")
+
         let activityDetails = try await client.createDeviceActivity(
             activityType: "UNASSIGN_DEVICES",
-            serials: serialNumbers,
+            serials: toSubmit,
             serviceId: serviceId
         )
         print(String(decoding: try JSONEncoder().encode(activityDetails), as: UTF8.self))

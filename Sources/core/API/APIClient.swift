@@ -230,6 +230,103 @@ public actor APIClient {
         return out
     }
 
+    // MARK: - Pre-flight Device Verification
+
+    /// Check whether a single device exists in the org via `GET /v1/orgDevices/{serial}`.
+    ///
+    /// Returns `true` on HTTP 200 and `false` on HTTP 404. Any other status throws —
+    /// an ambiguous response (auth, server error after retries, etc.) must not be
+    /// silently treated as "not found", since that would drop a possibly-valid serial
+    /// from an assign/unassign batch.
+    public func deviceExists(serialNumber: String) async throws -> Bool {
+        try await ensureValidToken()
+
+        let url = URL(string: Endpoints.orgDevice(serialNumber).path, relativeTo: Endpoints.base(for: creds.scope))!
+        var urlReq = URLRequest(url: url)
+        urlReq.httpMethod = HTTPMethod.GET.rawValue
+        urlReq.setValue("Bearer \(token.access_token)", forHTTPHeaderField: "Authorization")
+        urlReq.setValue("application/json", forHTTPHeaderField: "Accept")
+
+        let (_, http) = try await performRequestWithRetry(urlReq)
+        switch http.statusCode {
+        case 200: return true
+        case 404: return false
+        default: throw RuntimeError("HTTP error \(http.statusCode) while verifying device \(serialNumber)")
+        }
+    }
+
+    /// Pre-flight a batch of serials, splitting them into devices that exist in the org,
+    /// serials Apple reports as not found (HTTP 404), and serials whose status could not be
+    /// determined (anything else, after retries).
+    ///
+    /// Lookups fan out with bounded concurrency, matching `enrichWithAppleCare`: Apple's API
+    /// multiplexes over a single HTTP/2 connection per host and drops streams above ~4, so the
+    /// default cap is deliberately low. Input order is preserved in each output bucket.
+    public func verifyDevices(serials: [String], concurrency: Int = 4) async -> DeviceVerification {
+        guard !serials.isEmpty else { return DeviceVerification(found: [], notFound: [], errored: []) }
+        let cap = max(1, min(concurrency, 32))
+
+        // Probe each distinct serial once. Duplicates (from comma input or a CSV with repeats)
+        // would otherwise race in `resultBySerial` — two concurrent probes of the same serial
+        // could overwrite each other, leaving its bucket nondeterministic. We still walk the
+        // original `serials` for output so ordering and any intentional duplicates are preserved.
+        var uniqueSerials: [String] = []
+        var seen = Set<String>()
+        for serial in serials where seen.insert(serial).inserted {
+            uniqueSerials.append(serial)
+        }
+        let total = uniqueSerials.count
+
+        enum Probe: Sendable {
+            case found
+            case notFound
+            case errored(String)
+        }
+
+        var resultBySerial: [String: Probe] = [:]
+
+        await withTaskGroup(of: (String, Probe).self) { group in
+            var index = 0
+
+            func enqueue(_ serial: String) {
+                group.addTask { [self] in
+                    do {
+                        let exists = try await self.deviceExists(serialNumber: serial)
+                        return (serial, exists ? .found : .notFound)
+                    } catch {
+                        return (serial, .errored(error.localizedDescription))
+                    }
+                }
+            }
+
+            while index < cap && index < total {
+                enqueue(uniqueSerials[index])
+                index += 1
+            }
+
+            while let (serial, probe) = await group.next() {
+                resultBySerial[serial] = probe
+                if index < total {
+                    enqueue(uniqueSerials[index])
+                    index += 1
+                }
+            }
+        }
+
+        var found: [String] = []
+        var notFound: [String] = []
+        var errored: [(serial: String, message: String)] = []
+        for serial in serials {
+            switch resultBySerial[serial] {
+            case .found: found.append(serial)
+            case .notFound: notFound.append(serial)
+            case .errored(let message): errored.append((serial, message))
+            case nil: errored.append((serial, "no result"))
+            }
+        }
+        return DeviceVerification(found: found, notFound: notFound, errored: errored)
+    }
+
     public func createDeviceActivity(activityType: String, serials: [String], serviceId: String) async throws -> ActivityDetails {
         struct ActivityResponse: Decodable {
             let data: ActivityData
@@ -712,11 +809,16 @@ public actor APIClient {
         }
     }
 
-    public func send<T: Decodable>(_ req: Request<T>) async throws -> T {
+    /// Refresh the access token if the cached one has expired.
+    private func ensureValidToken() async throws {
         if token.isExpired {
             token = try await Self.fetchToken(creds, session: session)
             Keychain.saveToken(token, profileName: profileName)
         }
+    }
+
+    public func send<T: Decodable>(_ req: Request<T>) async throws -> T {
+        try await ensureValidToken()
 
         let url: URL = req.path.hasPrefix("https://")
             ? URL(string: req.path)!
@@ -733,10 +835,30 @@ public actor APIClient {
             urlReq.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
 
-        return try await performRequestWithRetry(urlReq)
+        let (data, http) = try await performRequestWithRetry(urlReq)
+
+        // Handle successful responses
+        if http.statusCode == 200 || http.statusCode == 201 {
+            return try JSONDecoder().decode(T.self, from: data)
+        }
+
+        // Non-retryable error - print diagnostic and throw
+        FileHandle.standardError.write(
+            Data("HTTP \(http.statusCode)\n".utf8)
+        )
+        FileHandle.standardError.write(data)
+        FileHandle.standardError.write(Data("\n".utf8))
+        throw RuntimeError("HTTP error \(http.statusCode)")
     }
 
-    private func performRequestWithRetry<T: Decodable>(_ urlReq: URLRequest) async throws -> T {
+    /// Execute a request with retry/backoff and return the final response.
+    ///
+    /// Retries 429/5xx/408 and transient network errors per the retry policy, then
+    /// returns the last `(data, response)` pair for any other status — including 4xx —
+    /// without throwing, so callers can branch on the status code (e.g. treat 404 as
+    /// "not found" rather than an error). Throws only on network failure or once
+    /// retries are exhausted.
+    private func performRequestWithRetry(_ urlReq: URLRequest) async throws -> (Data, HTTPURLResponse) {
         var lastError: Error?
 
         for attempt in 0...maxRetries {
@@ -744,11 +866,6 @@ public actor APIClient {
                 let (data, resp) = try await session.data(for: urlReq)
                 guard let http = resp as? HTTPURLResponse else {
                     throw RuntimeError("Invalid response type")
-                }
-
-                // Handle successful responses
-                if http.statusCode == 200 || http.statusCode == 201 {
-                    return try JSONDecoder().decode(T.self, from: data)
                 }
 
                 // Handle 429 (Rate Limited) and other retryable errors
@@ -763,13 +880,7 @@ public actor APIClient {
                     continue
                 }
 
-                // Non-retryable error - print diagnostic and throw
-                FileHandle.standardError.write(
-                    Data("HTTP \(http.statusCode)\n".utf8)
-                )
-                FileHandle.standardError.write(data)
-                FileHandle.standardError.write(Data("\n".utf8))
-                throw RuntimeError("HTTP error \(http.statusCode)")
+                return (data, http)
 
             } catch {
                 lastError = error
