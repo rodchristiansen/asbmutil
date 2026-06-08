@@ -265,7 +265,17 @@ public actor APIClient {
     public func verifyDevices(serials: [String], concurrency: Int = 4) async -> DeviceVerification {
         guard !serials.isEmpty else { return DeviceVerification(found: [], notFound: [], errored: []) }
         let cap = max(1, min(concurrency, 32))
-        let total = serials.count
+
+        // Probe each distinct serial once. Duplicates (from comma input or a CSV with repeats)
+        // would otherwise race in `resultBySerial` — two concurrent probes of the same serial
+        // could overwrite each other, leaving its bucket nondeterministic. We still walk the
+        // original `serials` for output so ordering and any intentional duplicates are preserved.
+        var uniqueSerials: [String] = []
+        var seen = Set<String>()
+        for serial in serials where seen.insert(serial).inserted {
+            uniqueSerials.append(serial)
+        }
+        let total = uniqueSerials.count
 
         enum Probe: Sendable {
             case found
@@ -290,14 +300,14 @@ public actor APIClient {
             }
 
             while index < cap && index < total {
-                enqueue(serials[index])
+                enqueue(uniqueSerials[index])
                 index += 1
             }
 
             while let (serial, probe) = await group.next() {
                 resultBySerial[serial] = probe
                 if index < total {
-                    enqueue(serials[index])
+                    enqueue(uniqueSerials[index])
                     index += 1
                 }
             }
