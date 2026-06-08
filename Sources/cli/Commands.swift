@@ -241,6 +241,14 @@ struct Assign: AsyncParsableCommand {
         guard (serials != nil) != (csvFile != nil) else {
             throw ValidationError("Must specify either --serials or --csv-file, but not both")
         }
+        if confirm {
+            guard confirmInterval >= 1 else {
+                throw ValidationError("--confirm-interval must be at least 1 second")
+            }
+            guard confirmTimeout >= 1 else {
+                throw ValidationError("--confirm-timeout must be at least 1 second")
+            }
+        }
     }
 
     func run() async throws {
@@ -316,6 +324,14 @@ struct Unassign: AsyncParsableCommand {
         guard (serials != nil) != (csvFile != nil) else {
             throw ValidationError("Must specify either --serials or --csv-file, but not both")
         }
+        if confirm {
+            guard confirmInterval >= 1 else {
+                throw ValidationError("--confirm-interval must be at least 1 second")
+            }
+            guard confirmTimeout >= 1 else {
+                throw ValidationError("--confirm-timeout must be at least 1 second")
+            }
+        }
     }
 
     func run() async throws {
@@ -376,6 +392,17 @@ struct BatchStatus: AsyncParsableCommand {
 
     @Option(name: .customLong("profile"), help: "Profile name to use for credentials")
     var profileName: String?
+
+    func validate() throws {
+        if poll {
+            guard interval >= 1 else {
+                throw ValidationError("--interval must be at least 1 second")
+            }
+            guard timeout >= 1 else {
+                throw ValidationError("--timeout must be at least 1 second")
+            }
+        }
+    }
 
     func run() async throws {
         let client = try await APIClient(credentials: Creds.load(profileName: profileName), profileName: profileName)
