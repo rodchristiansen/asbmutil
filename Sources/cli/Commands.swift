@@ -144,7 +144,7 @@ private func verifiedSerials(_ serials: [String], client: APIClient, operation: 
         for s in result.notFound {
             FileHandle.standardError.write(Data("  \(s)\n".utf8))
         }
-        FileHandle.standardError.write(Data("These returned HTTP 404 — not yet registered by the reseller, or mistyped.\n".utf8))
+        FileHandle.standardError.write(Data("These returned HTTP 404 — not in School/Business Manager yet (not registered by the reseller), or mistyped.\n".utf8))
     }
     if !result.errored.isEmpty {
         FileHandle.standardError.write(Data("\nCould not verify (\(result.errored.count)) — skipped:\n".utf8))

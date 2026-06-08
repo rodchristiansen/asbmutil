@@ -139,7 +139,7 @@ struct AssignmentView: View {
                         Text(viewModel.notFoundSerials.joined(separator: ", "))
                             .font(.caption.monospaced()).foregroundStyle(.secondary)
                             .textSelection(.enabled)
-                        Text("Not registered in School/Business Manager yet, or mistyped.")
+                        Text("Not in School/Business Manager yet (not registered by the reseller), or mistyped.")
                             .font(.caption2).foregroundStyle(.tertiary)
                     }
                     if !viewModel.erroredSerials.isEmpty {
