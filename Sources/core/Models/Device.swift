@@ -286,6 +286,27 @@ public struct EnhancedAssignedServerData: Codable, Sendable {
     }
 }
 
+// MARK: - Device Verification (pre-flight existence check)
+
+/// Outcome of pre-flight `GET /v1/orgDevices/{id}` checks before an assign/unassign.
+///
+/// `found` are serials Apple confirmed exist in the org (HTTP 200) and are safe to submit.
+/// `notFound` are serials Apple reports don't exist (HTTP 404) — not yet registered by the
+/// reseller, or mistyped. `errored` are serials whose existence couldn't be determined
+/// (any other status after retries); they are excluded from submission and surfaced so the
+/// operator can retry rather than have a possibly-valid device silently dropped.
+public struct DeviceVerification: Sendable {
+    public let found: [String]
+    public let notFound: [String]
+    public let errored: [(serial: String, message: String)]
+
+    public init(found: [String], notFound: [String], errored: [(serial: String, message: String)]) {
+        self.found = found
+        self.notFound = notFound
+        self.errored = errored
+    }
+}
+
 // MARK: - Activity Details
 
 public struct ActivityDetails: Codable, Sendable, Identifiable {

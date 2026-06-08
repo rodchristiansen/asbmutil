@@ -98,6 +98,13 @@ struct AssignmentView: View {
                 Text("\(viewModel.serialNumbers.count) serial(s)")
                     .foregroundStyle(.secondary).font(.caption)
             }
+
+            Toggle("Verify serials exist before submitting", isOn: Binding(
+                get: { !viewModel.skipVerify },
+                set: { viewModel.skipVerify = !$0 }
+            ))
+            .font(.caption)
+            .help("Checks each serial against School/Business Manager first. Serials that don't exist (e.g. not yet registered by the reseller) are reported and excluded rather than silently no-op'd.")
         }
     }
 
@@ -117,6 +124,30 @@ struct AssignmentView: View {
         if let error = viewModel.errorMessage {
             Label(error, systemImage: "exclamationmark.triangle")
                 .foregroundStyle(.red).font(.caption)
+        }
+
+        if !viewModel.notFoundSerials.isEmpty || !viewModel.erroredSerials.isEmpty {
+            GroupBox {
+                VStack(alignment: .leading, spacing: 6) {
+                    if !viewModel.notFoundSerials.isEmpty {
+                        Label("\(viewModel.notFoundSerials.count) serial(s) not found — excluded", systemImage: "questionmark.circle")
+                            .foregroundStyle(.orange).font(.caption.weight(.medium))
+                        Text(viewModel.notFoundSerials.joined(separator: ", "))
+                            .font(.caption.monospaced()).foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                        Text("Not registered in School/Business Manager yet, or mistyped.")
+                            .font(.caption2).foregroundStyle(.tertiary)
+                    }
+                    if !viewModel.erroredSerials.isEmpty {
+                        Label("\(viewModel.erroredSerials.count) serial(s) could not be verified — excluded", systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(.orange).font(.caption.weight(.medium))
+                        Text(viewModel.erroredSerials.joined(separator: "\n"))
+                            .font(.caption.monospaced()).foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
 
         if let result = viewModel.result {
