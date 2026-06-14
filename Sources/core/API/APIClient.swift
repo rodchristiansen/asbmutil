@@ -1159,6 +1159,102 @@ public actor APIClient {
         }
     }
 
+    // MARK: - Audit Events (API 2.0)
+
+    /// Query organization audit events within a time range, following cursor pagination.
+    ///
+    /// `startTimestamp`/`endTimestamp` are required by Apple and must be ISO8601 UTC (e.g.
+    /// `2026-06-01T00:00:00Z`). Apple supports only a single `type`, `subjectId`, and `actorId`
+    /// per query, so each is a scalar filter. Pass `type` (e.g. `DEVICE_ASSIGNED_TO_SERVER`) to
+    /// scope to one event kind — the basis for migration verification. `eventsPerPage` controls
+    /// page size (Apple max 1000); `totalLimit` caps the events returned across all pages.
+    public func listAuditEvents(
+        startTimestamp: String,
+        endTimestamp: String,
+        type: String? = nil,
+        subjectId: String? = nil,
+        actorId: String? = nil,
+        eventsPerPage: Int? = nil,
+        totalLimit: Int? = nil
+    ) async throws -> [AuditEventRecord] {
+        var out: [AuditEventRecord] = []
+        var cursor: String? = nil
+        var page = 0
+        let maxPages = 1000
+
+        repeat {
+            if page >= maxPages {
+                throw RuntimeError("listAuditEvents: pagination exceeded \(maxPages) pages; results would be truncated at \(out.count) events.")
+            }
+            let path = auditEventsPath(
+                start: startTimestamp,
+                end: endTimestamp,
+                type: type,
+                subjectId: subjectId,
+                actorId: actorId,
+                limit: eventsPerPage,
+                cursor: cursor
+            )
+            let response: AuditEventsResponse = try await send(
+                Request(method: .GET, path: path, scope: creds.scope, body: nil)
+            )
+            out += response.data.map(AuditEventRecord.init(from:))
+
+            if let totalLimit, out.count >= totalLimit {
+                return Array(out.prefix(totalLimit))
+            }
+
+            cursor = response.meta?.paging.nextCursor ?? Self.cursor(fromNextLink: response.links?.next)
+            page += 1
+            if cursor != nil {
+                try await Task.sleep(nanoseconds: 100_000_000) // 0.1s courtesy delay, matching listDevices
+            }
+        } while cursor != nil
+
+        return out
+    }
+
+    /// Build the `/v1/auditEvents` path with its filter query, fully percent-encoded.
+    ///
+    /// Both the bracketed filter keys (`filter[startTimestamp]` → `filter%5BstartTimestamp%5D`) and
+    /// the values are encoded here. This matters because `send()` re-parses the path with
+    /// `URL(string:)`: if that string contains any character it must encode (e.g. a literal `[`),
+    /// the parser re-encodes the whole query component — turning our already-encoded `%2B` into
+    /// `%252B` (double encoding). Handing it a fully-valid string sidesteps that, and pre-encoding
+    /// values keeps cursor tokens with `+`, `/`, or `=` intact (a raw `+` would otherwise reach the
+    /// server as a space).
+    private func auditEventsPath(
+        start: String,
+        end: String,
+        type: String?,
+        subjectId: String?,
+        actorId: String?,
+        limit: Int?,
+        cursor: String?
+    ) -> String {
+        let valueAllowed = CharacterSet.urlQueryAllowed.subtracting(.init(charactersIn: "+&=?#[]/"))
+        func enc(_ s: String) -> String { s.addingPercentEncoding(withAllowedCharacters: valueAllowed) ?? s }
+        func encKey(_ s: String) -> String { s.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? s }
+        var pairs: [(String, String)] = [
+            ("filter[startTimestamp]", start),
+            ("filter[endTimestamp]", end),
+        ]
+        if let type { pairs.append(("filter[type]", type)) }
+        if let subjectId { pairs.append(("filter[subjectId]", subjectId)) }
+        if let actorId { pairs.append(("filter[actorId]", actorId)) }
+        if let limit { pairs.append(("limit", String(limit))) }
+        if let cursor { pairs.append(("cursor", cursor)) }
+        let query = pairs.map { "\(encKey($0.0))=\(enc($0.1))" }.joined(separator: "&")
+        return Endpoints.auditEvents.path + "?" + query
+    }
+
+    /// Extract the `cursor` query parameter from a paging `links.next` URL, for the deployments
+    /// that paginate via `links` rather than `meta.paging.nextCursor`.
+    private static func cursor(fromNextLink link: String?) -> String? {
+        guard let link, let comps = URLComponents(string: link) else { return nil }
+        return comps.queryItems?.first(where: { $0.name == "cursor" })?.value
+    }
+
     /// Refresh the access token if the cached one has expired.
     private func ensureValidToken() async throws {
         if token.isExpired {
