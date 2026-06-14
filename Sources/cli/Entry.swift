@@ -23,6 +23,7 @@ struct ASBMUtil: AsyncParsableCommand {
             CancelMigration.self,
             MigrationStatus.self,
             ReleaseDevices.self,
+            AuditEvents.self,
             // Hidden aliases for backward compatibility
             GetDeviceInfoAlias.self,
             GetDeviceAlias.self,
