@@ -1177,6 +1177,14 @@ public actor APIClient {
         eventsPerPage: Int? = nil,
         totalLimit: Int? = nil
     ) async throws -> [AuditEventRecord] {
+        // Audit Events is an Apple Business API feature (2.1+). The Apple School Manager API is
+        // still 1.5 and does not expose it, so the request 404s ("PATH_ERROR: The resource
+        // 'v1/auditEvents' does not exist") on a School tenant. Fail early with a clear message
+        // rather than surfacing a confusing not-found from the server.
+        guard creds.scope != "school.api" else {
+            throw RuntimeError("Audit Events is an Apple Business API feature (2.1+) and is not available on Apple School Manager tenants. The credential in use (profile '\(profileName)') is a School Manager account, so GET /v1/auditEvents returns 404. Use an Apple Business Manager API key to query audit events.")
+        }
+
         var out: [AuditEventRecord] = []
         var cursor: String? = nil
         var page = 0
