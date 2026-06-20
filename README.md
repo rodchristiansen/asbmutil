@@ -21,7 +21,7 @@ Get devices info, assign/unassign MDM servers, and resolve device-to-server assi
 * Bulk AppleCare enrichment for whole fleets via `list-devices --include-applecare` (two-pass fan-out, no CSV required)
 * **NEW (API 1.6 School / 2.3 Business)**: Headless device management service migration — `assign --migration-deadline` schedules a no-erase MDM migration with a deadline, `update-migration-deadline` moves it, `cancel-migration` stops it, and `migration-status` reads each device's `isMdmMigrationCapable` / `mdmMigrationStatus` / `mdmMigrationDeadlineDateTime`
 * **NEW (API 2.4, Apple Business Manager only)**: `release-devices` removes devices from the organization
-* **NEW (API 2.0)**: Organization audit events via `audit-events` — query device/server moves and other org changes by time range and type (e.g. migration verification via `DEVICE_ASSIGNED_TO_SERVER`)
+* **NEW (API 2.0, Apple Business Manager only)**: Organization audit events via `audit-events` — query device/server moves and other org changes by time range and type (e.g. migration verification via `DEVICE_ASSIGNED_TO_SERVER`)
 * **NEW (API 1.5)**: MAC addresses support multiple values (array format) for devices with multiple network interfaces
 * **NEW (API 1.4)**: Wi-Fi, Bluetooth, and built-in Ethernet MAC addresses for macOS
 * **NEW (API 1.3)**: AppleCare coverage lookup for devices (single-serial via `get-devices-info`, whole-fleet via `list-devices --include-applecare`)
@@ -240,6 +240,8 @@ The app has the same operations. The Assignments section and the multi-select in
 ### Audit Events (API 2.0)
 
 `audit-events` queries the organization audit log over a time range. `--start` and `--end` are required ISO8601 UTC timestamps; results are emitted as a flattened JSON array (device serial and target server are pulled out of the matching event data) on stdout, with a count on stderr. Apple accepts only one `--type`, `--subject-id`, and `--actor-id` per query.
+
+> **Apple Business Manager only.** Audit Events is part of the Apple Business API (2.1+). The Apple School Manager API is still at 1.5 and does not expose this endpoint, so running `audit-events` against a School Manager credential fails fast with a clear message instead of the server's raw 404 `PATH_ERROR`.
 
 The primary use is migration verification: after reassigning devices, confirm each move actually landed by pulling `DEVICE_ASSIGNED_TO_SERVER` events for the window.
 
