@@ -1,0 +1,41 @@
+name: ABM inventory report
+
+# Read-only example: pull the current device-to-MDM-server picture from Apple
+# Business/School Manager on a schedule and publish it as a build artifact.
+# Nothing here mutates ABM, so it's safe to run on a timer.
+#
+# Copy this file into your own repo's .github/workflows/ and add three secrets:
+#   ASBM_CLIENT_ID, ASBM_KEY_ID, ASBM_PRIVATE_KEY_PEM
+# (Create the API credential in ABM → Preferences → API, then download the key.)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 7 * * *"   # every day at 07:00 UTC
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install asbmutil + load credentials
+        env:
+          ASBM_CLIENT_ID: ${{ secrets.ASBM_CLIENT_ID }}
+          ASBM_KEY_ID: ${{ secrets.ASBM_KEY_ID }}
+          ASBM_PRIVATE_KEY_PEM: ${{ secrets.ASBM_PRIVATE_KEY_PEM }}
+        run: examples/ci/setup-asbmutil.sh
+
+      - name: Pull ABM state
+        run: |
+          export PATH="$PWD/bin:$PATH"
+          mkdir -p out
+          asbmutil list-mdm-servers > out/mdm-servers.json
+          asbmutil list-devices-servers --all > out/devices-by-server.json
+          echo "Servers:"
+          jq -r '.[] | "  \(.serverName): \(.deviceCount // "n/a") devices"' out/devices-by-server.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: abm-report
+          path: out/*.json
