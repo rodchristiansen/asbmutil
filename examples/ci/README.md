@@ -72,11 +72,28 @@ with `0600` permissions.
 
 ## Handy read-only commands to script
 
+Every MDM server and its id:
+
 ```bash
-asbmutil list-mdm-servers                          # every MDM server + id
-asbmutil list-devices-servers --all                # devices grouped by server
-asbmutil list-devices-servers --serials A,B,C      # which server each serial is on
-asbmutil get-devices-info --serials A,B,C          # attributes + AppleCare + MDM
-asbmutil list-devices --include-applecare          # whole-fleet AppleCare coverage
-asbmutil audit-events --start ... --end ... --type DEVICE_ASSIGNED_TO_SERVER
+asbmutil list-mdm-servers
+```
+
+Devices grouped by server, or the server a given set of serials is on:
+
+```bash
+asbmutil list-devices-servers --all
+asbmutil list-devices-servers --serials A,B,C
+```
+
+Full per-device attributes (including AppleCare and assigned MDM), and whole-fleet AppleCare coverage:
+
+```bash
+asbmutil get-devices-info --serials A,B,C
+asbmutil list-devices --include-applecare
+```
+
+Migration verification from Apple's own audit log (Business Manager only):
+
+```bash
+asbmutil audit-events --start 2026-07-01T00:00:00Z --end 2026-07-14T23:59:59Z --type DEVICE_ASSIGNED_TO_SERVER
 ```
