@@ -1,0 +1,54 @@
+name: Reassign devices to an MDM
+
+# Write example: move a set of serials to a different MDM server in ABM — the
+# core of a MicroMDM -> Intune (or any A -> B) migration. Manual-trigger only,
+# and dry-run by default so you always see the plan before anything changes.
+#
+# Secrets required: ASBM_CLIENT_ID, ASBM_KEY_ID, ASBM_PRIVATE_KEY_PEM.
+
+on:
+  workflow_dispatch:
+    inputs:
+      serials:
+        description: "Comma-separated serial numbers to reassign"
+        required: true
+      mdm:
+        description: "Target MDM server name (as it appears in ABM)"
+        required: true
+        default: "Intune"
+      dry_run:
+        description: "Show the plan without changing anything"
+        type: boolean
+        default: true
+
+jobs:
+  assign:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install asbmutil + load credentials
+        env:
+          ASBM_CLIENT_ID: ${{ secrets.ASBM_CLIENT_ID }}
+          ASBM_KEY_ID: ${{ secrets.ASBM_KEY_ID }}
+          ASBM_PRIVATE_KEY_PEM: ${{ secrets.ASBM_PRIVATE_KEY_PEM }}
+        run: examples/ci/setup-asbmutil.sh
+
+      - name: Show current assignment
+        run: |
+          export PATH="$PWD/bin:$PATH"
+          echo "Current MDM for the requested serials:"
+          asbmutil list-devices-servers --serials "${{ inputs.serials }}" | jq
+
+      - name: Reassign
+        if: ${{ inputs.dry_run == false }}
+        run: |
+          export PATH="$PWD/bin:$PATH"
+          asbmutil assign \
+            --serials "${{ inputs.serials }}" \
+            --mdm "${{ inputs.mdm }}" \
+            --confirm
+
+      - name: Dry run notice
+        if: ${{ inputs.dry_run == true }}
+        run: echo "Dry run — no changes made. Re-run with dry_run unchecked to apply."
