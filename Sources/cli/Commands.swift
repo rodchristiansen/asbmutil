@@ -987,6 +987,15 @@ struct AuditEvents: AsyncParsableCommand {
     var profileName: String?
 
     func validate() throws {
+        guard let startDate = APIClient.parseISO8601(start) else {
+            throw ValidationError("--start must be an ISO 8601 UTC timestamp, e.g. 2026-06-01T00:00:00Z (got '\(start)')")
+        }
+        guard let endDate = APIClient.parseISO8601(end) else {
+            throw ValidationError("--end must be an ISO 8601 UTC timestamp, e.g. 2026-06-14T23:59:59Z (got '\(end)')")
+        }
+        guard startDate < endDate else {
+            throw ValidationError("--start (\(start)) must be earlier than --end (\(end))")
+        }
         if let eventsPerPage {
             guard eventsPerPage > 0 && eventsPerPage <= 1000 else {
                 throw ValidationError("Events per page must be between 1 and 1000")
