@@ -910,7 +910,7 @@ struct ReleaseDevices: AsyncParsableCommand {
     func run() async throws {
         let credentials = try Creds.load(profileName: profileName)
         guard credentials.scope != "school.api" else {
-            throw RuntimeError("release-devices is an Apple Business API feature (2.4+) and is not available on Apple School Manager tenants. The credential in use (profile '\(profileName ?? Keychain.getCurrentProfile())') is a School Manager account.")
+            throw RuntimeError("release-devices is an Apple Business API feature (2.4+) and is not available on Apple School Manager tenants: the School host rejects RELEASE_DEVICES with 409 ENTITY_ERROR.ATTRIBUTE.TYPE. The credential in use (profile '\(profileName ?? Keychain.getCurrentProfile())') is a School Manager account.")
         }
         let client = try await APIClient(credentials: credentials, profileName: profileName)
         let serialNumbers = try parseSerials(serials: serials, csvFile: csvFile)

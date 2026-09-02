@@ -400,8 +400,10 @@ public actor APIClient {
         } catch let error as RuntimeError where type.isMigrationType && creds.scope == "school.api" {
             // Apple lists device management service migration in School Manager API 1.6 (changelog
             // 2026-08-12) but rolls the release out per tenant; until it lands the School host
-            // rejects the new activity types. Say so instead of leaving a bare 4xx.
-            if let code = error.statusCode, [400, 404, 422].contains(code) {
+            // rejects the new activity types. An unknown activityType comes back as 409
+            // ENTITY_ERROR.ATTRIBUTE.TYPE (observed live); 400/422 cover other validation shapes.
+            // Say so instead of leaving a bare 4xx.
+            if let code = error.statusCode, [400, 409, 422].contains(code) {
                 throw RuntimeError("\(error.description). \(type.rawValue) is part of Apple School Manager API 1.6, which Apple is still rolling out; this tenant (profile '\(profileName)') may not serve it yet. The same activity works on Apple Business API 2.3+.", statusCode: code)
             }
             throw error
