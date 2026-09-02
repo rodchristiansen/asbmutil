@@ -264,63 +264,19 @@ public actor APIClient {
     /// default cap is deliberately low. Input order is preserved in each output bucket.
     public func verifyDevices(serials: [String], concurrency: Int = 4) async -> DeviceVerification {
         guard !serials.isEmpty else { return DeviceVerification(found: [], notFound: [], errored: []) }
-        let cap = max(1, min(concurrency, 32))
 
-        // Probe each distinct serial once. Duplicates (from comma input or a CSV with repeats)
-        // would otherwise race in `resultBySerial` — two concurrent probes of the same serial
-        // could overwrite each other, leaving its bucket nondeterministic. We still walk the
-        // original `serials` for output so ordering and any intentional duplicates are preserved.
-        var uniqueSerials: [String] = []
-        var seen = Set<String>()
-        for serial in serials where seen.insert(serial).inserted {
-            uniqueSerials.append(serial)
-        }
-        let total = uniqueSerials.count
-
-        enum Probe: Sendable {
-            case found
-            case notFound
-            case errored(String)
-        }
-
-        var resultBySerial: [String: Probe] = [:]
-
-        await withTaskGroup(of: (String, Probe).self) { group in
-            var index = 0
-
-            func enqueue(_ serial: String) {
-                group.addTask { [self] in
-                    do {
-                        let exists = try await self.deviceExists(serialNumber: serial)
-                        return (serial, exists ? .found : .notFound)
-                    } catch {
-                        return (serial, .errored(error.localizedDescription))
-                    }
-                }
-            }
-
-            while index < cap && index < total {
-                enqueue(uniqueSerials[index])
-                index += 1
-            }
-
-            while let (serial, probe) = await group.next() {
-                resultBySerial[serial] = probe
-                if index < total {
-                    enqueue(uniqueSerials[index])
-                    index += 1
-                }
-            }
+        let results = await fanOut(serials: serials, concurrency: concurrency) { [self] serial in
+            try await self.deviceExists(serialNumber: serial)
         }
 
         var found: [String] = []
         var notFound: [String] = []
         var errored: [(serial: String, message: String)] = []
         for serial in serials {
-            switch resultBySerial[serial] {
-            case .found: found.append(serial)
-            case .notFound: notFound.append(serial)
-            case .errored(let message): errored.append((serial, message))
+            switch results[serial] {
+            case .success(true): found.append(serial)
+            case .success(false): notFound.append(serial)
+            case .failure(let error): errored.append((serial, error.localizedDescription))
             case nil: errored.append((serial, "no result"))
             }
         }
@@ -473,44 +429,20 @@ public actor APIClient {
     /// One request per serial, fanned out with bounded concurrency; input order is preserved. A
     /// serial that cannot be read yields a record with `error` set instead of failing the batch.
     public func mdmMigrationStatus(serials: [String], concurrency: Int = 4) async -> [MdmMigrationRecord] {
-        let limit = max(1, min(concurrency, 32))
-        var results: [MdmMigrationRecord?] = Array(repeating: nil, count: serials.count)
-
-        await withTaskGroup(of: (Int, MdmMigrationRecord).self) { group in
-            var index = 0
-            func enqueue(_ i: Int) {
-                let serial = serials[i]
-                group.addTask { [self] in
-                    do {
-                        let device = try await self.getDeviceAttributes(serialNumber: serial)
-                        return (i, MdmMigrationRecord(device: device))
-                    } catch {
-                        return (i, MdmMigrationRecord(
-                            serialNumber: serial,
-                            isMdmMigrationCapable: nil,
-                            mdmMigrationStatus: nil,
-                            mdmMigrationDeadlineDateTime: nil,
-                            status: nil,
-                            deviceManagementServiceId: nil,
-                            error: error.localizedDescription
-                        ))
-                    }
-                }
-            }
-            while index < min(limit, serials.count) {
-                enqueue(index)
-                index += 1
-            }
-            for await (i, record) in group {
-                results[i] = record
-                if index < serials.count {
-                    enqueue(index)
-                    index += 1
-                }
-            }
+        let results = await fanOut(serials: serials, concurrency: concurrency) { [self] serial in
+            try await self.getDeviceAttributes(serialNumber: serial)
         }
 
-        return results.compactMap { $0 }
+        return serials.map { serial in
+            switch results[serial] {
+            case .success(let device):
+                return MdmMigrationRecord(device: device)
+            case .failure(let error):
+                return MdmMigrationRecord(serialNumber: serial, isMdmMigrationCapable: nil, mdmMigrationStatus: nil, mdmMigrationDeadlineDateTime: nil, status: nil, deviceManagementServiceId: nil, error: error.localizedDescription)
+            case nil:
+                return MdmMigrationRecord(serialNumber: serial, isMdmMigrationCapable: nil, mdmMigrationStatus: nil, mdmMigrationDeadlineDateTime: nil, status: nil, deviceManagementServiceId: nil, error: "no result")
+            }
+        }
     }
 
     /// Re-read each device and reconcile its migration state against the intended end state.
@@ -577,46 +509,23 @@ public actor APIClient {
     /// Re-read each serial after a release settled. A released device reads back as HTTP 404 or
     /// carries `releasedFromOrgDateTime`; anything else is still present.
     public func confirmRelease(serials: [String], concurrency: Int = 4) async -> ReleaseReconciliation {
-        let limit = max(1, min(concurrency, 32))
-        enum Probe: Sendable { case released, present, errored(String) }
-        var outcomes: [Probe?] = Array(repeating: nil, count: serials.count)
-
-        await withTaskGroup(of: (Int, Probe).self) { group in
-            var index = 0
-            func enqueue(_ i: Int) {
-                let serial = serials[i]
-                group.addTask { [self] in
-                    do {
-                        let device = try await self.getDeviceAttributes(serialNumber: serial)
-                        return (i, device.releasedFromOrgDateTime != nil ? .released : .present)
-                    } catch let error as RuntimeError where error.statusCode == 404 {
-                        return (i, .released)
-                    } catch {
-                        return (i, .errored(error.localizedDescription))
-                    }
-                }
-            }
-            while index < min(limit, serials.count) {
-                enqueue(index)
-                index += 1
-            }
-            for await (i, probe) in group {
-                outcomes[i] = probe
-                if index < serials.count {
-                    enqueue(index)
-                    index += 1
-                }
+        let results = await fanOut(serials: serials, concurrency: concurrency) { [self] serial -> Bool in
+            do {
+                let device = try await self.getDeviceAttributes(serialNumber: serial)
+                return device.releasedFromOrgDateTime != nil
+            } catch let error as RuntimeError where error.statusCode == 404 {
+                return true
             }
         }
 
         var released: [String] = []
         var present: [String] = []
         var errored: [(serial: String, message: String)] = []
-        for (i, serial) in serials.enumerated() {
-            switch outcomes[i] {
-            case .released: released.append(serial)
-            case .present: present.append(serial)
-            case .errored(let message): errored.append((serial, message))
+        for serial in serials {
+            switch results[serial] {
+            case .success(true): released.append(serial)
+            case .success(false): present.append(serial)
+            case .failure(let error): errored.append((serial, error.localizedDescription))
             case nil: errored.append((serial, "no result"))
             }
         }
@@ -765,49 +674,17 @@ public actor APIClient {
         concurrency: Int = 4
     ) async -> AssignmentReconciliation {
         guard !serials.isEmpty else { return AssignmentReconciliation(asExpected: [], mismatched: [], errored: []) }
-        let cap = max(1, min(concurrency, 32))
-        let total = serials.count
 
-        enum Outcome: Sendable {
-            case assignedServer(String?)   // current server id, nil if unassigned
-            case errored(String)
-        }
-
-        var outcomeBySerial: [String: Outcome] = [:]
-
-        await withTaskGroup(of: (String, Outcome).self) { group in
-            var index = 0
-
-            func enqueue(_ serial: String) {
-                group.addTask { [self] in
-                    do {
-                        let response = try await self.getAssignedMdmRaw(deviceId: serial)
-                        return (serial, .assignedServer(response.data?.id))
-                    } catch {
-                        return (serial, .errored(error.localizedDescription))
-                    }
-                }
-            }
-
-            while index < cap && index < total {
-                enqueue(serials[index])
-                index += 1
-            }
-            while let (serial, outcome) = await group.next() {
-                outcomeBySerial[serial] = outcome
-                if index < total {
-                    enqueue(serials[index])
-                    index += 1
-                }
-            }
+        let results = await fanOut(serials: serials, concurrency: concurrency) { [self] serial -> String? in
+            try await self.getAssignedMdmRaw(deviceId: serial).data?.id
         }
 
         var asExpected: [String] = []
         var mismatched: [(serial: String, assignedTo: String?)] = []
         var errored: [(serial: String, message: String)] = []
         for serial in serials {
-            switch outcomeBySerial[serial] {
-            case .assignedServer(let current):
+            switch results[serial] {
+            case .success(let current):
                 let matches: Bool
                 switch expected {
                 case .assigned(let serverId): matches = (current == serverId)
@@ -818,8 +695,8 @@ public actor APIClient {
                 } else {
                     mismatched.append((serial, current))
                 }
-            case .errored(let message):
-                errored.append((serial, message))
+            case .failure(let error):
+                errored.append((serial, error.localizedDescription))
             case nil:
                 errored.append((serial, "no result"))
             }
@@ -1388,16 +1265,95 @@ public actor APIClient {
         return min(delay, maxDelaySeconds)
     }
 
+    /// Whether an error is a transport-level failure worth retrying on a fresh connection.
+    ///
+    /// Besides the obvious connectivity codes, this covers HTTP/2 stream failures. On Linux,
+    /// URLSession rides libcurl and multiplexes concurrent requests over one HTTP/2 connection;
+    /// when a stream dies (`PROTOCOL_ERROR`, or the server sending a `transfer-encoding: chunked`
+    /// header that HTTP/2 forbids) every stream in flight on that connection fails with it. Those
+    /// surface as `URLError` codes that are not network codes, or as foreign error types with the
+    /// curl message in the description, so match on both. A retry after backoff lands on a new
+    /// connection.
     private func isNetworkError(_ error: Error) -> Bool {
         if let urlError = error as? URLError {
             switch urlError.code {
-            case .timedOut, .cannotConnectToHost, .networkConnectionLost, .notConnectedToInternet:
+            case .timedOut, .cannotConnectToHost, .networkConnectionLost, .notConnectedToInternet,
+                 .cannotFindHost, .dnsLookupFailed, .secureConnectionFailed,
+                 .badServerResponse, .cannotParseResponse, .unknown:
                 return true
             default:
-                return false
+                break
             }
         }
-        return false
+        let text = "\(error) \(error.localizedDescription)"
+        let markers = ["HTTP/2", "PROTOCOL_ERROR", "Invalid HTTP header", "stream", "connection reset", "Connection reset", "Empty reply", "transfer closed"]
+        return markers.contains { text.contains($0) }
+    }
+
+    // MARK: - Fan-out helper
+
+    /// Run `operation` once per distinct serial with bounded concurrency, then retry any serial
+    /// that failed, sequentially, before reporting it as an error.
+    ///
+    /// Two passes because a single transport failure can take down every request sharing a
+    /// connection (see `isNetworkError`); the per-request retry inside `send` handles most of it,
+    /// and the sequential pass mops up the rest on a quiet connection. Results are keyed by
+    /// serial; callers walk their own input order so duplicates and ordering are preserved.
+    private func fanOut<T: Sendable>(
+        serials: [String],
+        concurrency: Int,
+        retryFailedSequentially: Bool = true,
+        operation: @escaping @Sendable (String) async throws -> T
+    ) async -> [String: Result<T, Error>] {
+        var uniqueSerials: [String] = []
+        var seen = Set<String>()
+        for serial in serials where seen.insert(serial).inserted {
+            uniqueSerials.append(serial)
+        }
+        guard !uniqueSerials.isEmpty else { return [:] }
+        let cap = max(1, min(concurrency, 32))
+        let total = uniqueSerials.count
+
+        var results: [String: Result<T, Error>] = [:]
+
+        await withTaskGroup(of: (String, Result<T, Error>).self) { group in
+            var index = 0
+            func enqueue(_ serial: String) {
+                group.addTask {
+                    do {
+                        return (serial, .success(try await operation(serial)))
+                    } catch {
+                        return (serial, .failure(error))
+                    }
+                }
+            }
+            while index < cap && index < total {
+                enqueue(uniqueSerials[index])
+                index += 1
+            }
+            while let (serial, result) = await group.next() {
+                results[serial] = result
+                if index < total {
+                    enqueue(uniqueSerials[index])
+                    index += 1
+                }
+            }
+        }
+
+        guard retryFailedSequentially else { return results }
+
+        let failed = uniqueSerials.filter {
+            if case .failure(let error) = results[$0] { return isNetworkError(error) }
+            return false
+        }
+        for serial in failed {
+            do {
+                results[serial] = .success(try await operation(serial))
+            } catch {
+                results[serial] = .failure(error)
+            }
+        }
+        return results
     }
 
     private static func fetchToken(_ c: Credentials,
