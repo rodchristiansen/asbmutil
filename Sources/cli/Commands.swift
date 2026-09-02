@@ -208,6 +208,85 @@ private func confirmActivity(
     }
 }
 
+/// Split `--serials` or read the first CSV column into a clean serial list.
+private func parseSerials(serials: String?, csvFile: String?) throws -> [String] {
+    if let serials {
+        return serials
+            .split(separator: ",")
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+    if let csvFile {
+        return try CSVParser.readSerials(from: csvFile)
+    }
+    throw ValidationError("No serial numbers provided")
+}
+
+/// Reject a migration deadline Apple would refuse: unparseable, already past, or more than 90 days out.
+private func validateMigrationDeadline(_ deadline: String) throws {
+    guard let date = APIClient.parseISO8601(deadline) else {
+        throw ValidationError("Migration deadline must be an ISO 8601 UTC timestamp, e.g. 2026-10-01T17:00:00Z (got '\(deadline)')")
+    }
+    let now = Date()
+    guard date > now else {
+        throw ValidationError("Migration deadline '\(deadline)' is in the past. Use update-migration-deadline with a past deadline to force an in-progress migration immediately.")
+    }
+    let maxSeconds = TimeInterval(mdmMigrationDeadlineMaxDays * 24 * 60 * 60)
+    guard date.timeIntervalSince(now) <= maxSeconds else {
+        throw ValidationError("Migration deadline '\(deadline)' is more than \(mdmMigrationDeadlineMaxDays) days out; Apple rejects deadlines beyond \(mdmMigrationDeadlineMaxDays) days.")
+    }
+}
+
+/// Poll a migration activity to a terminal state, then re-read each device's migration state and
+/// reconcile it against the intended end state. Reports to stderr; throws (non-zero exit) if any
+/// serial didn't land as expected.
+private func confirmMigrationActivity(
+    _ activity: ActivityDetails,
+    serials: [String],
+    expected: MigrationExpectation,
+    client: APIClient,
+    interval: Int,
+    timeout: Int
+) async throws {
+    FileHandle.standardError.write(Data("\nConfirming activity \(activity.id) (polling up to \(timeout)s)...\n".utf8))
+    let finalStatus = try await client.waitForActivityTerminal(
+        id: activity.id,
+        intervalSeconds: interval,
+        timeoutSeconds: timeout
+    ) { status in
+        FileHandle.standardError.write(Data("  poll: \(status)\n".utf8))
+    }
+
+    if finalStatus == "TIMEOUT" {
+        throw RuntimeError("Activity \(activity.id) did not reach a terminal state within \(timeout)s; cannot confirm. Re-check later with: asbmutil batch-status \(activity.id)")
+    }
+    FileHandle.standardError.write(Data("Activity terminal status: \(finalStatus)\n".utf8))
+
+    FileHandle.standardError.write(Data("Re-reading migration state for \(serials.count) device(s)...\n".utf8))
+    let result = await client.confirmMdmMigration(serials: serials, expected: expected)
+
+    FileHandle.standardError.write(Data("\nConfirmed as expected (\(result.asExpected.count)/\(serials.count)).\n".utf8))
+    if !result.mismatched.isEmpty {
+        FileHandle.standardError.write(Data("\nNot in expected state (\(result.mismatched.count)):\n".utf8))
+        for m in result.mismatched {
+            let state = m.mdmMigrationStatus ?? "no migration"
+            let deadline = m.mdmMigrationDeadlineDateTime.map { " deadline \($0)" } ?? ""
+            let capable = m.isMdmMigrationCapable == false ? " (not migration-capable)" : ""
+            FileHandle.standardError.write(Data("  \(m.serialNumber): \(state)\(deadline)\(capable)\n".utf8))
+        }
+    }
+    if !result.errored.isEmpty {
+        FileHandle.standardError.write(Data("\nCould not confirm (\(result.errored.count)):\n".utf8))
+        for e in result.errored {
+            FileHandle.standardError.write(Data("  \(e.serial): \(e.message)\n".utf8))
+        }
+    }
+
+    if !result.mismatched.isEmpty || !result.errored.isEmpty {
+        throw RuntimeError("Confirmation incomplete: \(result.asExpected.count) of \(serials.count) device(s) reached the expected migration state.")
+    }
+}
+
 struct Assign: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "assign",
@@ -222,10 +301,13 @@ struct Assign: AsyncParsableCommand {
     @Option(name: .customLong("mdm"), help: "MDM server name")
     var mdmName: String
 
+    @Option(name: .customLong("migration-deadline"), help: "Schedule a no-erase device management service migration to the target MDM that must complete by this ISO 8601 UTC deadline (e.g. 2026-10-01T17:00:00Z; at most \(mdmMigrationDeadlineMaxDays) days out). Submits ASSIGN_DEVICES_WITH_MDM_MIGRATION_DEADLINE instead of ASSIGN_DEVICES (API 1.6 School / 2.3 Business).")
+    var migrationDeadline: String?
+
     @Flag(name: .customLong("skip-verify"), help: "Skip the pre-flight check that each serial exists before submitting. By default, serials returning HTTP 404 (e.g. not yet registered by the reseller) are reported and excluded.")
     var skipVerify: Bool = false
 
-    @Flag(name: .customLong("confirm"), help: "After submitting, poll the activity to completion and re-query each device to confirm it actually landed on the target MDM. Exits non-zero if any device didn't.")
+    @Flag(name: .customLong("confirm"), help: "After submitting, poll the activity to completion and re-query each device to confirm it actually landed on the target MDM (or, with --migration-deadline, that a migration is pending with that deadline). Exits non-zero if any device didn't.")
     var confirm: Bool = false
 
     @Option(name: .customLong("confirm-interval"), help: "Seconds between confirmation polls (default: 10)")
@@ -241,6 +323,9 @@ struct Assign: AsyncParsableCommand {
         guard (serials != nil) != (csvFile != nil) else {
             throw ValidationError("Must specify either --serials or --csv-file, but not both")
         }
+        if let migrationDeadline {
+            try validateMigrationDeadline(migrationDeadline)
+        }
         if confirm {
             guard confirmInterval >= 1 else {
                 throw ValidationError("--confirm-interval must be at least 1 second")
@@ -255,38 +340,49 @@ struct Assign: AsyncParsableCommand {
         let client = try await APIClient(credentials: Creds.load(profileName: profileName), profileName: profileName)
         let serviceId = try await client.getMdmServerIdByName(mdmName)
 
-        let serialNumbers: [String]
-        if let serials = serials {
-            serialNumbers = serials
-                .split(separator: ",")
-                .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
-        } else if let csvFile = csvFile {
-            serialNumbers = try CSVParser.readSerials(from: csvFile)
-        } else {
-            throw ValidationError("No serial numbers provided")
-        }
+        let serialNumbers = try parseSerials(serials: serials, csvFile: csvFile)
 
+        let operation = migrationDeadline == nil ? "assign" : "schedule migration for"
         let toSubmit = skipVerify
             ? serialNumbers
-            : try await verifiedSerials(serialNumbers, client: client, operation: "assign")
+            : try await verifiedSerials(serialNumbers, client: client, operation: operation)
 
-        let activityDetails = try await client.createDeviceActivity(
-            activityType: "ASSIGN_DEVICES",
-            serials: toSubmit,
-            serviceId: serviceId
-        )
+        let activityDetails: ActivityDetails
+        if let migrationDeadline {
+            activityDetails = try await client.scheduleMdmMigration(
+                serials: toSubmit,
+                serviceId: serviceId,
+                deadline: migrationDeadline
+            )
+        } else {
+            activityDetails = try await client.createDeviceActivity(
+                type: .assignDevices,
+                serials: toSubmit,
+                serviceId: serviceId
+            )
+        }
         print(String(decoding: try JSONEncoder().encode(activityDetails), as: UTF8.self))
 
         if confirm {
-            try await confirmActivity(
-                activityDetails,
-                serials: toSubmit,
-                expected: .assigned(serverId: serviceId),
-                client: client,
-                interval: confirmInterval,
-                timeout: confirmTimeout
-            )
+            if let migrationDeadline {
+                try await confirmMigrationActivity(
+                    activityDetails,
+                    serials: toSubmit,
+                    expected: .scheduled(deadline: migrationDeadline),
+                    client: client,
+                    interval: confirmInterval,
+                    timeout: confirmTimeout
+                )
+            } else {
+                try await confirmActivity(
+                    activityDetails,
+                    serials: toSubmit,
+                    expected: .assigned(serverId: serviceId),
+                    client: client,
+                    interval: confirmInterval,
+                    timeout: confirmTimeout
+                )
+            }
         }
     }
 }
@@ -338,24 +434,14 @@ struct Unassign: AsyncParsableCommand {
         let client = try await APIClient(credentials: Creds.load(profileName: profileName), profileName: profileName)
         let serviceId = try await client.getMdmServerIdByName(mdmName)
 
-        let serialNumbers: [String]
-        if let serials = serials {
-            serialNumbers = serials
-                .split(separator: ",")
-                .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
-        } else if let csvFile = csvFile {
-            serialNumbers = try CSVParser.readSerials(from: csvFile)
-        } else {
-            throw ValidationError("No serial numbers provided")
-        }
+        let serialNumbers = try parseSerials(serials: serials, csvFile: csvFile)
 
         let toSubmit = skipVerify
             ? serialNumbers
             : try await verifiedSerials(serialNumbers, client: client, operation: "unassign")
 
         let activityDetails = try await client.createDeviceActivity(
-            activityType: "UNASSIGN_DEVICES",
+            type: .unassignDevices,
             serials: toSubmit,
             serviceId: serviceId
         )
@@ -603,6 +689,268 @@ struct ListDevicesServers: AsyncParsableCommand {
         let assigned = assignments.count
         let total = serialSet.count
         FileHandle.standardError.write(Data("Done: \(assigned)/\(total) devices have MDM assignments\n".utf8))
+    }
+}
+
+// MARK: - Device Management Service Migration (API 1.6 School / 2.3 Business)
+
+struct UpdateMigrationDeadline: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "update-migration-deadline",
+        abstract: "Move the deadline of an in-progress device management service migration"
+    )
+
+    @Option(name: .customLong("serials"), help: "Comma-separated list of device serial numbers")
+    var serials: String?
+
+    @Option(name: .customLong("csv-file"), help: "Path to CSV file containing serial numbers (first column)")
+    var csvFile: String?
+
+    @Option(name: .customLong("deadline"), help: "New ISO 8601 UTC deadline (e.g. 2026-10-01T17:00:00Z). An earlier or past deadline is enforced on the device immediately with no option to delay.")
+    var deadline: String
+
+    @Flag(name: .customLong("allow-past"), help: "Permit a deadline that is already in the past (forces the migration now). Without this, past deadlines are rejected.")
+    var allowPast: Bool = false
+
+    @Flag(name: .customLong("confirm"), help: "After submitting, poll the activity to completion and re-read each device to confirm a migration is pending with the new deadline. Exits non-zero if any device isn't.")
+    var confirm: Bool = false
+
+    @Option(name: .customLong("confirm-interval"), help: "Seconds between confirmation polls (default: 10)")
+    var confirmInterval: Int = 10
+
+    @Option(name: .customLong("confirm-timeout"), help: "Max seconds to poll for completion when --confirm is set (default: 240)")
+    var confirmTimeout: Int = 240
+
+    @Option(name: .customLong("profile"), help: "Profile name to use for credentials")
+    var profileName: String?
+
+    func validate() throws {
+        guard (serials != nil) != (csvFile != nil) else {
+            throw ValidationError("Must specify either --serials or --csv-file, but not both")
+        }
+        if allowPast {
+            guard APIClient.parseISO8601(deadline) != nil else {
+                throw ValidationError("Deadline must be an ISO 8601 UTC timestamp, e.g. 2026-10-01T17:00:00Z (got '\(deadline)')")
+            }
+        } else {
+            try validateMigrationDeadline(deadline)
+        }
+        if confirm {
+            guard confirmInterval >= 1 else { throw ValidationError("--confirm-interval must be at least 1 second") }
+            guard confirmTimeout >= 1 else { throw ValidationError("--confirm-timeout must be at least 1 second") }
+        }
+    }
+
+    func run() async throws {
+        let client = try await APIClient(credentials: Creds.load(profileName: profileName), profileName: profileName)
+        let serialNumbers = try parseSerials(serials: serials, csvFile: csvFile)
+
+        let activityDetails = try await client.updateMdmMigrationDeadline(serials: serialNumbers, deadline: deadline)
+        print(String(decoding: try JSONEncoder().encode(activityDetails), as: UTF8.self))
+
+        if confirm {
+            try await confirmMigrationActivity(
+                activityDetails,
+                serials: serialNumbers,
+                expected: .scheduled(deadline: deadline),
+                client: client,
+                interval: confirmInterval,
+                timeout: confirmTimeout
+            )
+        }
+    }
+}
+
+struct CancelMigration: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "cancel-migration",
+        abstract: "Cancel an in-progress device management service migration"
+    )
+
+    @Option(name: .customLong("serials"), help: "Comma-separated list of device serial numbers")
+    var serials: String?
+
+    @Option(name: .customLong("csv-file"), help: "Path to CSV file containing serial numbers (first column)")
+    var csvFile: String?
+
+    @Flag(name: .customLong("confirm"), help: "After submitting, poll the activity to completion and re-read each device to confirm no migration is pending. Exits non-zero if one still is.")
+    var confirm: Bool = false
+
+    @Option(name: .customLong("confirm-interval"), help: "Seconds between confirmation polls (default: 10)")
+    var confirmInterval: Int = 10
+
+    @Option(name: .customLong("confirm-timeout"), help: "Max seconds to poll for completion when --confirm is set (default: 240)")
+    var confirmTimeout: Int = 240
+
+    @Option(name: .customLong("profile"), help: "Profile name to use for credentials")
+    var profileName: String?
+
+    func validate() throws {
+        guard (serials != nil) != (csvFile != nil) else {
+            throw ValidationError("Must specify either --serials or --csv-file, but not both")
+        }
+        if confirm {
+            guard confirmInterval >= 1 else { throw ValidationError("--confirm-interval must be at least 1 second") }
+            guard confirmTimeout >= 1 else { throw ValidationError("--confirm-timeout must be at least 1 second") }
+        }
+    }
+
+    func run() async throws {
+        let client = try await APIClient(credentials: Creds.load(profileName: profileName), profileName: profileName)
+        let serialNumbers = try parseSerials(serials: serials, csvFile: csvFile)
+
+        let activityDetails = try await client.cancelMdmMigration(serials: serialNumbers)
+        print(String(decoding: try JSONEncoder().encode(activityDetails), as: UTF8.self))
+
+        if confirm {
+            try await confirmMigrationActivity(
+                activityDetails,
+                serials: serialNumbers,
+                expected: .cancelled,
+                client: client,
+                interval: confirmInterval,
+                timeout: confirmTimeout
+            )
+        }
+    }
+}
+
+struct MigrationStatus: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "migration-status",
+        abstract: "Show each device's migration eligibility, state and deadline"
+    )
+
+    @Option(name: .customLong("serials"), help: "Comma-separated list of device serial numbers")
+    var serials: String?
+
+    @Option(name: .customLong("csv-file"), help: "Path to CSV file containing serial numbers (first column)")
+    var csvFile: String?
+
+    @Option(name: .customLong("concurrency"), help: "Number of concurrent device reads (default: 4, max: 32)")
+    var concurrency: Int = 4
+
+    @Option(name: .customLong("profile"), help: "Profile name to use for credentials")
+    var profileName: String?
+
+    func validate() throws {
+        guard (serials != nil) != (csvFile != nil) else {
+            throw ValidationError("Must specify either --serials or --csv-file, but not both")
+        }
+        guard concurrency >= 1 && concurrency <= 32 else {
+            throw ValidationError("Concurrency must be between 1 and 32")
+        }
+    }
+
+    func run() async throws {
+        let client = try await APIClient(credentials: Creds.load(profileName: profileName), profileName: profileName)
+        let serialNumbers = try parseSerials(serials: serials, csvFile: csvFile)
+
+        let records = await client.mdmMigrationStatus(serials: serialNumbers, concurrency: concurrency)
+
+        let active = records.filter(\.hasActiveMigration).count
+        let errored = records.filter { $0.error != nil }.count
+        let reported = records.filter { $0.isMdmMigrationCapable != nil || $0.mdmMigrationStatus != nil }.count
+        FileHandle.standardError.write(Data("\(records.count) device(s): \(active) with a pending migration, \(errored) could not be read.\n".utf8))
+        if reported == 0 && errored < records.count {
+            FileHandle.standardError.write(Data("No device reported any migration fields. The tenant may not serve the migration release yet (Apple School Manager API 1.6 is rolling out; Apple Business API 2.3+ has it).\n".utf8))
+        }
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .prettyPrinted
+        print(String(decoding: try encoder.encode(records), as: UTF8.self))
+    }
+}
+
+// MARK: - Release Devices (API 2.4 Business)
+
+struct ReleaseDevices: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "release-devices",
+        abstract: "Release devices from the organization (Apple Business Manager only; irreversible)"
+    )
+
+    @Option(name: .customLong("serials"), help: "Comma-separated list of device serial numbers")
+    var serials: String?
+
+    @Option(name: .customLong("csv-file"), help: "Path to CSV file containing serial numbers (first column)")
+    var csvFile: String?
+
+    @Flag(name: .customLong("yes"), help: "Required. Acknowledge that released devices leave the organization permanently: enrollment assignments are removed, they are unenrolled from the built-in device management service and dropped from Blueprints.")
+    var yes: Bool = false
+
+    @Flag(name: .customLong("skip-verify"), help: "Skip the pre-flight check that each serial exists before submitting.")
+    var skipVerify: Bool = false
+
+    @Flag(name: .customLong("confirm"), help: "After submitting, poll the activity to completion and re-read each device to confirm it is gone from the organization. Exits non-zero if any device is still present.")
+    var confirm: Bool = false
+
+    @Option(name: .customLong("confirm-interval"), help: "Seconds between confirmation polls (default: 10)")
+    var confirmInterval: Int = 10
+
+    @Option(name: .customLong("confirm-timeout"), help: "Max seconds to poll for completion when --confirm is set (default: 240)")
+    var confirmTimeout: Int = 240
+
+    @Option(name: .customLong("profile"), help: "Profile name to use for credentials")
+    var profileName: String?
+
+    func validate() throws {
+        guard (serials != nil) != (csvFile != nil) else {
+            throw ValidationError("Must specify either --serials or --csv-file, but not both")
+        }
+        guard yes else {
+            throw ValidationError("release-devices permanently removes devices from the organization. Re-run with --yes to proceed.")
+        }
+        if confirm {
+            guard confirmInterval >= 1 else { throw ValidationError("--confirm-interval must be at least 1 second") }
+            guard confirmTimeout >= 1 else { throw ValidationError("--confirm-timeout must be at least 1 second") }
+        }
+    }
+
+    func run() async throws {
+        let credentials = try Creds.load(profileName: profileName)
+        guard credentials.scope != "school.api" else {
+            throw RuntimeError("release-devices is an Apple Business API feature (2.4+) and is not available on Apple School Manager tenants. The credential in use (profile '\(profileName ?? Keychain.getCurrentProfile())') is a School Manager account.")
+        }
+        let client = try await APIClient(credentials: credentials, profileName: profileName)
+        let serialNumbers = try parseSerials(serials: serials, csvFile: csvFile)
+
+        let toSubmit = skipVerify
+            ? serialNumbers
+            : try await verifiedSerials(serialNumbers, client: client, operation: "release")
+
+        let activityDetails = try await client.releaseDevices(serials: toSubmit)
+        print(String(decoding: try JSONEncoder().encode(activityDetails), as: UTF8.self))
+
+        if confirm {
+            FileHandle.standardError.write(Data("\nConfirming activity \(activityDetails.id) (polling up to \(confirmTimeout)s)...\n".utf8))
+            let finalStatus = try await client.waitForActivityTerminal(
+                id: activityDetails.id,
+                intervalSeconds: confirmInterval,
+                timeoutSeconds: confirmTimeout
+            ) { status in
+                FileHandle.standardError.write(Data("  poll: \(status)\n".utf8))
+            }
+            if finalStatus == "TIMEOUT" {
+                throw RuntimeError("Activity \(activityDetails.id) did not reach a terminal state within \(confirmTimeout)s; cannot confirm. Re-check later with: asbmutil batch-status \(activityDetails.id)")
+            }
+            FileHandle.standardError.write(Data("Activity terminal status: \(finalStatus)\n".utf8))
+
+            FileHandle.standardError.write(Data("Re-reading \(toSubmit.count) device(s)...\n".utf8))
+            let result = await client.confirmRelease(serials: toSubmit)
+            FileHandle.standardError.write(Data("\nReleased (\(result.released.count)/\(toSubmit.count)).\n".utf8))
+            if !result.stillPresent.isEmpty {
+                FileHandle.standardError.write(Data("\nStill in the organization (\(result.stillPresent.count)):\n".utf8))
+                for s in result.stillPresent { FileHandle.standardError.write(Data("  \(s)\n".utf8)) }
+            }
+            if !result.errored.isEmpty {
+                FileHandle.standardError.write(Data("\nCould not confirm (\(result.errored.count)):\n".utf8))
+                for e in result.errored { FileHandle.standardError.write(Data("  \(e.serial): \(e.message)\n".utf8)) }
+            }
+            if !result.stillPresent.isEmpty || !result.errored.isEmpty {
+                throw RuntimeError("Confirmation incomplete: \(result.released.count) of \(toSubmit.count) device(s) confirmed released.")
+            }
+        }
     }
 }
 

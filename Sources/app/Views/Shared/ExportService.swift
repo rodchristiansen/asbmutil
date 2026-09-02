@@ -74,14 +74,17 @@ enum ExportService {
     private static let columns = [
         "Serial Number", "Model", "Product Family", "Product Type", "Status",
         "Storage", "Color", "Source", "Order Number", "Part Number",
-        "Order Date", "Added", "Updated"
+        "Order Date", "Added", "Updated",
+        "Migration Capable", "Migration Status", "Migration Deadline"
     ]
 
     private static func values(for d: DeviceAttributes) -> [String] {
         [d.serialNumber, d.displayModel, d.productFamily ?? "", d.productType ?? "",
          d.status ?? "", d.deviceCapacity ?? "", d.color ?? "",
          d.purchaseSourceType ?? "", d.orderNumber ?? "", d.partNumber ?? "",
-         d.orderDateTime ?? "", d.addedToOrgDateTime ?? "", d.updatedDateTime ?? ""]
+         d.orderDateTime ?? "", d.addedToOrgDateTime ?? "", d.updatedDateTime ?? "",
+         d.isMdmMigrationCapable.map { $0 ? "true" : "false" } ?? "",
+         d.mdmMigrationStatus ?? "", d.mdmMigrationDeadlineDateTime ?? ""]
     }
 
     private static func generateCSV(_ devices: [DeviceAttributes]) -> String {
