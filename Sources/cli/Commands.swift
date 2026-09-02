@@ -954,6 +954,78 @@ struct ReleaseDevices: AsyncParsableCommand {
     }
 }
 
+// MARK: - Audit Events (API 2.0)
+
+struct AuditEvents: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "audit-events",
+        abstract: "Query organization audit events (API 2.0) within a time range"
+    )
+
+    @Option(name: .customLong("start"), help: "Start timestamp, ISO8601 UTC (e.g. 2026-06-01T00:00:00Z). Required.")
+    var start: String
+
+    @Option(name: .customLong("end"), help: "End timestamp, ISO8601 UTC (e.g. 2026-06-14T23:59:59Z). Required.")
+    var end: String
+
+    @Option(name: .customLong("type"), help: "Filter to a single event type (e.g. DEVICE_ASSIGNED_TO_SERVER, DEVICE_UNASSIGNED_FROM_SERVER, DEVICE_ADDED_TO_ORG). Apple supports only one type per query.")
+    var type: String?
+
+    @Option(name: .customLong("subject-id"), help: "Filter to a single subject ID (e.g. a device serial number).")
+    var subjectId: String?
+
+    @Option(name: .customLong("actor-id"), help: "Filter to a single actor ID.")
+    var actorId: String?
+
+    @Option(name: .customLong("events-per-page"), help: "Events per API request (1-1000; default: API default).")
+    var eventsPerPage: Int?
+
+    @Option(name: .customLong("total-limit"), help: "Maximum total events to retrieve across all pages (default: no limit).")
+    var totalLimit: Int?
+
+    @Option(name: .customLong("profile"), help: "Profile name to use for credentials")
+    var profileName: String?
+
+    func validate() throws {
+        guard let startDate = APIClient.parseISO8601(start) else {
+            throw ValidationError("--start must be an ISO 8601 UTC timestamp, e.g. 2026-06-01T00:00:00Z (got '\(start)')")
+        }
+        guard let endDate = APIClient.parseISO8601(end) else {
+            throw ValidationError("--end must be an ISO 8601 UTC timestamp, e.g. 2026-06-14T23:59:59Z (got '\(end)')")
+        }
+        guard startDate < endDate else {
+            throw ValidationError("--start (\(start)) must be earlier than --end (\(end))")
+        }
+        if let eventsPerPage {
+            guard eventsPerPage > 0 && eventsPerPage <= 1000 else {
+                throw ValidationError("Events per page must be between 1 and 1000")
+            }
+        }
+        if let totalLimit {
+            guard totalLimit > 0 else {
+                throw ValidationError("Total limit must be greater than 0")
+            }
+        }
+    }
+
+    func run() async throws {
+        let client = try await APIClient(credentials: Creds.load(profileName: profileName), profileName: profileName)
+        let events = try await client.listAuditEvents(
+            startTimestamp: start,
+            endTimestamp: end,
+            type: type,
+            subjectId: subjectId,
+            actorId: actorId,
+            eventsPerPage: eventsPerPage,
+            totalLimit: totalLimit
+        )
+        FileHandle.standardError.write(Data("Retrieved \(events.count) audit event(s).\n".utf8))
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .prettyPrinted
+        print(String(decoding: try encoder.encode(events), as: UTF8.self))
+    }
+}
+
 struct GetAssignedMdm: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "get-assigned-mdm",
