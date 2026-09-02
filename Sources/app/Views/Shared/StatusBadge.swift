@@ -16,9 +16,9 @@ struct StatusBadge: View {
 
     private var badgeColor: Color {
         switch status.uppercased() {
-        case "ASSIGNED", "COMPLETE", "COMPLETED", "ACTIVE", "CONNECTED":
+        case "ASSIGNED", "COMPLETE", "COMPLETED", "ACTIVE", "CONNECTED", "SUCCESS":
             return .green
-        case "UNASSIGNED", "PENDING", "IN_PROGRESS":
+        case "UNASSIGNED", "PENDING", "IN_PROGRESS", "REQUESTED", "STARTED":
             return .orange
         case "FAILED", "ERROR", "EXPIRED", "CANCELED":
             return .red

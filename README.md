@@ -220,6 +220,8 @@ Apple's 2026-08-12 release lets you change a device's device management service 
 
 `migration-status` reads `GET /v1/orgDevices/{serial}` for each serial and prints `isMdmMigrationCapable`, `mdmMigrationStatus` (`REQUESTED`, `STARTED`, `SUCCESS`, `FAILED`), `mdmMigrationDeadlineDateTime`, plus the assignment status and service ID. The same three fields also appear on every device in `list-devices` and `get-devices-info`, and in the app's device detail and exports.
 
+The app has the same operations. The Assignments section and the multi-select inspector offer Migrate, Update Deadline and Cancel Migration alongside Assign and Unassign, with a date picker that shows the exact UTC timestamp being sent and refuses past or over-90-day deadlines. A device's detail view offers Migrate by Deadline when Apple reports it eligible, and Update Deadline / Cancel Migration when a migration is pending. The Devices table gains a sortable Migration column and a Migration filter (status, or Eligible / Not eligible), which is the quickest way to find `FAILED` and `REQUESTED` stragglers across a fleet.
+
 ```bash
 ./asbmutil migration-status --csv-file devices.csv
 ```
@@ -228,7 +230,7 @@ Apple's 2026-08-12 release lets you change a device's device management service 
 
 ### Release devices (API 2.4, Apple Business Manager only)
 
-`release-devices` submits `RELEASE_DEVICES`, which removes devices from the organization permanently: enrollment assignments are removed, devices are unenrolled from the built-in device management service and dropped from Blueprints. It requires `--yes`, runs the same pre-flight serial verification as `assign`, and with `--confirm` re-reads each serial afterwards, treating an HTTP 404 or a set `releasedFromOrgDateTime` as released. The Apple School Manager API does not offer this activity, so the command refuses to run against a School Manager credential.
+`release-devices` submits `RELEASE_DEVICES`, which removes devices from the organization permanently: enrollment assignments are removed, devices are unenrolled from the built-in device management service and dropped from Blueprints. It requires `--yes`, runs the same pre-flight serial verification as `assign`, and with `--confirm` re-reads each serial afterwards, treating an HTTP 404 or a set `releasedFromOrgDateTime` as released. The Apple School Manager API does not offer this activity (the School host rejects it with 409 `ENTITY_ERROR.ATTRIBUTE.TYPE`), so the command refuses to run against a School Manager credential. In the app, Release appears as an operation only when the active profile is a Business Manager credential, and requires ticking an acknowledgement before the button enables.
 
 ```bash
 ./asbmutil release-devices --csv-file retired.csv --yes --confirm

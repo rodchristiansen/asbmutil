@@ -16,6 +16,10 @@ final class AppViewModel {
     private(set) var connectionState: ConnectionState = .disconnected
     private(set) var connectionError: String?
 
+    /// True when the active profile is an Apple Business Manager credential. Some activities
+    /// (release) exist only on the Business API, so views use this to hide them on School.
+    private(set) var isBusinessTenant = false
+
     // Shared device + server caches (Dashboard and Devices both read from these)
     var devices: [DeviceAttributes] = []
     var mdmServers: [MdmServerWithId] = []
@@ -57,6 +61,7 @@ final class AppViewModel {
         apiClient = nil
         connectionState = .disconnected
         isAuthenticated = false
+        isBusinessTenant = false
         connectionError = nil
         devices = []
         mdmServers = []
@@ -76,6 +81,7 @@ final class AppViewModel {
             let credentials = try Creds.load(profileName: activeProfile)
             let client = try await APIClient(credentials: credentials, profileName: activeProfile)
             apiClient = client
+            isBusinessTenant = credentials.scope == "business.api"
             connectionState = .connected
             isAuthenticated = true
         } catch {

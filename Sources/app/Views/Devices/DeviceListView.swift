@@ -260,7 +260,23 @@ struct InlineAssignView: View {
     @State private var isExecuting = false
     @State private var result: ActivityDetails?
     @State private var errorMessage: String?
+    @State private var deadline: Date = MigrationDeadline.defaultDate
+    @State private var allowPastDeadline = false
+    @State private var acknowledgeRelease = false
     let serials: [String]
+
+    private var deadlineProblem: String? {
+        guard mode.needsDeadline else { return nil }
+        return MigrationDeadline.problem(with: deadline, allowPast: mode == .updateDeadline && allowPastDeadline)
+    }
+
+    private var canExecute: Bool {
+        if isExecuting { return false }
+        if mode.needsServer && selectedServerName.isEmpty { return false }
+        if deadlineProblem != nil { return false }
+        if mode.isDestructive && !acknowledgeRelease { return false }
+        return true
+    }
 
     var body: some View {
         ScrollView {
@@ -284,20 +300,52 @@ struct InlineAssignView: View {
 
                 // Action
                 Picker("Action", selection: $mode) {
-                    ForEach(AssignmentMode.allCases, id: \.self) { m in
+                    ForEach(AssignmentMode.available(business: appViewModel.isBusinessTenant)) { m in
                         Text(m.rawValue).tag(m)
                     }
                 }
-                .pickerStyle(.segmented)
+                .labelsHidden()
+                Text(mode.help).font(.caption2).foregroundStyle(.secondary)
 
-                if servers.isEmpty {
-                    ProgressView("Loading servers...").controlSize(.small)
-                } else {
-                    Picker("Server", selection: $selectedServerName) {
-                        Text("Select a server...").tag("")
-                        ForEach(servers, id: \.id) { s in
-                            Text(s.serverName ?? s.id).tag(s.serverName ?? "")
+                if mode.needsServer {
+                    if servers.isEmpty {
+                        ProgressView("Loading servers...").controlSize(.small)
+                    } else {
+                        Picker("Server", selection: $selectedServerName) {
+                            Text("Select a server...").tag("")
+                            ForEach(servers, id: \.id) { s in
+                                Text(s.serverName ?? s.id).tag(s.serverName ?? "")
+                            }
                         }
+                    }
+                }
+
+                if mode.needsDeadline {
+                    VStack(alignment: .leading, spacing: 4) {
+                        DatePicker(
+                            "Deadline",
+                            selection: $deadline,
+                            in: (mode == .updateDeadline && allowPastDeadline ? Date.distantPast : Date())...MigrationDeadline.maxDate,
+                            displayedComponents: [.date, .hourAndMinute]
+                        )
+                        Text("Sent as \(MigrationDeadline.isoString(deadline)); at most \(mdmMigrationDeadlineMaxDays) days out.")
+                            .font(.caption2).foregroundStyle(.tertiary)
+                        if mode == .updateDeadline {
+                            Toggle("Allow a past deadline (forces the migration now)", isOn: $allowPastDeadline)
+                                .font(.caption2)
+                        }
+                        if let deadlineProblem {
+                            Text(deadlineProblem).foregroundStyle(.orange).font(.caption2)
+                        }
+                    }
+                }
+
+                if mode.isDestructive {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Label("Releasing is permanent", systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.red).font(.caption.weight(.semibold))
+                        Toggle("I understand these devices will be released permanently", isOn: $acknowledgeRelease)
+                            .font(.caption2)
                     }
                 }
 
@@ -324,13 +372,13 @@ struct InlineAssignView: View {
                     } label: {
                         HStack {
                             if isExecuting { ProgressView().controlSize(.small) }
-                            Text(mode == .assign ? "Assign" : "Unassign")
+                            Text(mode.buttonTitle)
                         }
                         .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(mode == .assign ? .blue : .orange)
-                    .disabled(selectedServerName.isEmpty || isExecuting)
+                    .tint(mode.tint)
+                    .disabled(!canExecute)
                     .controlSize(.large)
                 }
             }
@@ -340,6 +388,7 @@ struct InlineAssignView: View {
             result = nil
             errorMessage = nil
             selectedServerName = ""
+            acknowledgeRelease = false
             do {
                 let client = try await appViewModel.ensureConnected()
                 servers = try await client.listMdmServers()
@@ -351,10 +400,11 @@ struct InlineAssignView: View {
         isExecuting = true; errorMessage = nil
         do {
             let client = try await appViewModel.ensureConnected()
-            let serviceId = try await client.getMdmServerIdByName(selectedServerName)
-            let activityType = mode == .assign ? "ASSIGN_DEVICES" : "UNASSIGN_DEVICES"
-            result = try await client.createDeviceActivity(
-                activityType: activityType, serials: serials, serviceId: serviceId
+            let serviceId: String? = mode.needsServer
+                ? try await client.getMdmServerIdByName(selectedServerName)
+                : nil
+            result = try await AssignmentViewModel.submit(
+                mode: mode, serials: serials, serviceId: serviceId, deadline: deadline, client: client
             )
         } catch { errorMessage = error.localizedDescription }
         isExecuting = false
