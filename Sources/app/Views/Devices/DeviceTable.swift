@@ -20,6 +20,7 @@ private extension DeviceAttributes {
         return value
     }
 
+    var sortMigration: String { migrationSummary }
     var sortOrderDate: Date { Self.parseDate(orderDateTime) }
     var sortUpdatedDate: Date { Self.parseDate(updatedDateTime) }
 
@@ -113,5 +114,14 @@ struct DeviceTable: View {
             Text(d.updatedDateTime ?? "")
         }
         .width(min: 80, ideal: 120)
+
+        TableColumn("Migration", value: \.sortMigration) { (d: DeviceAttributes) in
+            if let status = d.mdmMigrationStatus {
+                StatusBadge(status: status)
+            } else {
+                Text(d.migrationSummary).foregroundStyle(.secondary)
+            }
+        }
+        .width(min: 80, ideal: 110)
     }
 }

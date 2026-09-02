@@ -7,6 +7,7 @@ enum FilterCategory: String, CaseIterable, Identifiable {
     case orderNumber = "Order Number"
     case productFamily = "Device Type"
     case capacity = "Storage Size"
+    case migration = "Migration"
     var id: String { rawValue }
 }
 
@@ -23,6 +24,7 @@ final class DeviceFilters {
         availableValues[.orderNumber] = uniqueSorted(devices.compactMap(\.orderNumber))
         availableValues[.productFamily] = uniqueSorted(devices.compactMap(\.productFamily))
         availableValues[.capacity] = uniqueSorted(devices.compactMap(\.deviceCapacity))
+        availableValues[.migration] = uniqueSorted(devices.map(\.migrationSummary))
     }
 
     func isActive(_ cat: FilterCategory) -> Bool { !(selectedValues[cat]?.isEmpty ?? true) }
@@ -51,6 +53,7 @@ final class DeviceFilters {
             case .orderNumber: v = d.orderNumber
             case .productFamily: v = d.productFamily
             case .capacity: v = d.deviceCapacity
+            case .migration: v = d.migrationSummary
             }
             guard let v, vals.contains(v) else { return false }
         }
@@ -59,5 +62,18 @@ final class DeviceFilters {
 
     private func uniqueSorted(_ v: [String]) -> [String] {
         Array(Set(v)).sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+}
+
+extension DeviceAttributes {
+    /// One word describing the device's migration state for table and filter use: the Apple
+    /// status when a migration exists, otherwise whether the device is eligible at all.
+    var migrationSummary: String {
+        if let status = mdmMigrationStatus { return status }
+        switch isMdmMigrationCapable {
+        case .some(true): return "Eligible"
+        case .some(false): return "Not eligible"
+        case .none: return "Unknown"
+        }
     }
 }

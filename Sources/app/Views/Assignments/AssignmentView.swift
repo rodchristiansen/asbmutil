@@ -33,19 +33,45 @@ struct AssignmentView: View {
     private var actionsSection: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                HStack(spacing: 16) {
-                    GroupBox("Operation") {
+                GroupBox("Operation") {
+                    VStack(alignment: .leading, spacing: 6) {
                         Picker("Mode", selection: $viewModel.mode) {
-                            ForEach(AssignmentMode.allCases, id: \.self) { mode in
+                            ForEach(AssignmentMode.available(business: appViewModel.isBusinessTenant)) { mode in
                                 Text(mode.rawValue).tag(mode)
                             }
                         }
                         .pickerStyle(.segmented)
-                        .frame(maxWidth: 200)
+                        .labelsHidden()
+                        Text(viewModel.mode.help)
+                            .font(.caption).foregroundStyle(.secondary)
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
 
-                    GroupBox("Server") {
-                        serverPicker
+                HStack(alignment: .top, spacing: 16) {
+                    if viewModel.mode.needsServer {
+                        GroupBox("Server") {
+                            serverPicker
+                        }
+                    }
+                    if viewModel.mode.needsDeadline {
+                        GroupBox("Migration Deadline") {
+                            deadlinePicker
+                        }
+                    }
+                }
+
+                if viewModel.mode.isDestructive {
+                    GroupBox {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Label("Releasing is permanent", systemImage: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.red).font(.callout.weight(.semibold))
+                            Text("Released devices leave the organization. Enrollment assignments are removed, they are unenrolled from the built-in device management service and dropped from Blueprints. There is no undo.")
+                                .font(.caption).foregroundStyle(.secondary)
+                            Toggle("I understand these devices will be released permanently", isOn: $viewModel.acknowledgeRelease)
+                                .font(.caption)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
 
@@ -78,6 +104,28 @@ struct AssignmentView: View {
         }
     }
 
+    private var deadlinePicker: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            DatePicker(
+                "Deadline",
+                selection: $viewModel.deadline,
+                in: (viewModel.mode == .updateDeadline && viewModel.allowPastDeadline ? Date.distantPast : Date())...MigrationDeadline.maxDate,
+                displayedComponents: [.date, .hourAndMinute]
+            )
+            .labelsHidden()
+            Text("Sent as \(MigrationDeadline.isoString(viewModel.deadline)). At most \(mdmMigrationDeadlineMaxDays) days out.")
+                .font(.caption2).foregroundStyle(.tertiary)
+            if viewModel.mode == .updateDeadline {
+                Toggle("Allow a past deadline (forces the migration now)", isOn: $viewModel.allowPastDeadline)
+                    .font(.caption)
+            }
+            if let problem = viewModel.deadlineProblem {
+                Label(problem, systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(.orange).font(.caption)
+            }
+        }
+    }
+
     private var serialInputSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             TextEditor(text: $viewModel.serialInput)
@@ -106,20 +154,20 @@ struct AssignmentView: View {
             .font(.caption)
             .help("Checks each serial against School/Business Manager first. Serials that don't exist (e.g. not yet registered by the reseller) are reported and excluded rather than silently no-op'd.")
 
-            Toggle("Confirm assignment after submitting", isOn: $viewModel.confirmAfterSubmit)
+            Toggle("Confirm end state after submitting", isOn: $viewModel.confirmAfterSubmit)
                 .font(.caption)
-                .help("After submitting, waits for the activity to finish and re-queries each device to confirm it actually reached the intended MDM. Slower, since it polls until the activity completes.")
+                .help("After submitting, waits for the activity to finish and re-queries each device to confirm it actually reached the intended state: the target MDM, a pending migration with this deadline, no pending migration, or released. Slower, since it polls until the activity completes.")
         }
     }
 
     @ViewBuilder
     private var executeSection: some View {
         HStack {
-            Button(viewModel.mode == .assign ? "Assign Devices" : "Unassign Devices") {
+            Button(viewModel.mode.buttonTitle) {
                 Task { await execute() }
             }
             .buttonStyle(.borderedProminent)
-            .tint(viewModel.mode == .assign ? .blue : .orange)
+            .tint(viewModel.mode.tint)
             .disabled(!viewModel.canExecute)
 
             if viewModel.isExecuting { ProgressView().controlSize(.small) }
@@ -166,6 +214,12 @@ struct AssignmentView: View {
                 }
                 LabeledContent("Status", value: result.status)
                 LabeledContent("Devices", value: "\(result.deviceCount)")
+                if let server = result.mdmServerName ?? result.mdmServerId {
+                    LabeledContent("Server", value: server)
+                }
+                if let deadline = result.mdmMigrationDeadlineDateTime {
+                    LabeledContent("Deadline", value: deadline)
+                }
             }
         }
 
@@ -225,14 +279,13 @@ struct AssignmentView: View {
             } else {
                 List(activityHistory) { activity in
                     HStack(spacing: 10) {
-                        Image(systemName: activity.activityType.contains("UNASSIGN")
-                              ? "arrow.uturn.backward.square" : "arrow.right.square")
+                        Image(systemName: AssignmentMode.from(activityType: activity.activityType)?.systemImage ?? "arrow.right.square")
                             .foregroundStyle(.secondary)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(activity.deviceSerials.count == 1
                                  ? activity.deviceSerials[0] : "Multiple")
                                 .font(.callout).fontWeight(.medium)
-                            Text("\(activity.deviceCount) Device\(activity.deviceCount == 1 ? "" : "s") \u{00B7} \(activity.mdmServerName ?? activity.mdmServerId ?? "-")")
+                            Text(historySubtitle(activity))
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()
@@ -242,6 +295,15 @@ struct AssignmentView: View {
                 }
             }
         }
+    }
+
+    private func historySubtitle(_ activity: ActivityDetails) -> String {
+        let count = "\(activity.deviceCount) Device\(activity.deviceCount == 1 ? "" : "s")"
+        let what = AssignmentMode.from(activityType: activity.activityType)?.rawValue ?? activity.activityType
+        var parts = [count, what]
+        if let server = activity.mdmServerName ?? activity.mdmServerId { parts.append(server) }
+        if let deadline = activity.mdmMigrationDeadlineDateTime { parts.append("by \(deadline)") }
+        return parts.joined(separator: " \u{00B7} ")
     }
 
     // MARK: - Actions

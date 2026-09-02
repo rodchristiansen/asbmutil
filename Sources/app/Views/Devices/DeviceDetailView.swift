@@ -10,6 +10,8 @@ struct DeviceDetailView: View {
     @State private var isAssigning = false
     @State private var assignResult: ActivityDetails?
     @State private var assignError: String?
+    @State private var migrationDeadline: Date = MigrationDeadline.defaultDate
+    @State private var allowPastDeadline = false
 
     let serialNumber: String
 
@@ -117,6 +119,7 @@ struct DeviceDetailView: View {
                 section("Timestamps", rows: timestampRows(info.device))
                 if let rows = migrationRows(info.device) {
                     section("Migration", rows: rows)
+                    migrationActions(info.device)
                 }
 
                 if let coverages = info.appleCareCoverage, !coverages.isEmpty {
@@ -161,7 +164,7 @@ struct DeviceDetailView: View {
 
                     HStack(spacing: 8) {
                         Button("Reassign") {
-                            Task { await performAssign(type: "ASSIGN_DEVICES") }
+                            Task { await perform(.assign) }
                         }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
@@ -177,6 +180,8 @@ struct DeviceDetailView: View {
 
                         if isAssigning { ProgressView().controlSize(.small) }
                     }
+
+                    migrateControls(currentMdm: currentMdm)
                 } else {
                     // Not assigned - can assign
                     Picker("Server", selection: $selectedServerName) {
@@ -189,7 +194,7 @@ struct DeviceDetailView: View {
 
                     HStack {
                         Button("Assign") {
-                            Task { await performAssign(type: "ASSIGN_DEVICES") }
+                            Task { await perform(.assign) }
                         }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
@@ -207,13 +212,106 @@ struct DeviceDetailView: View {
         }
     }
 
-    private func performAssign(type: String) async {
+    /// Migration scheduling for an assigned device (API 1.6 School / 2.3 Business). Only offered
+    /// when Apple reports the device as migration-capable; hidden when the tenant doesn't serve the
+    /// field, and explained when the device isn't eligible.
+    @ViewBuilder
+    private func migrateControls(currentMdm: AssignedMdmInfo?) -> some View {
+        if let device = viewModel.deviceInfo?.device, let capable = device.isMdmMigrationCapable {
+            if device.hasActiveMdmMigration {
+                Text("A migration is already pending; manage it in the Migration section below.")
+                    .font(.caption2).foregroundStyle(.tertiary)
+            } else if capable {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Or migrate without erasing, by a deadline:")
+                        .font(.caption2).foregroundStyle(.secondary)
+                    deadlinePicker
+                    HStack(spacing: 8) {
+                        Button("Migrate by Deadline") {
+                            Task { await perform(.migrate) }
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.blue)
+                        .controlSize(.small)
+                        .disabled(selectedServerName.isEmpty || isAssigning || deadlineProblem != nil)
+                    }
+                    if let deadlineProblem {
+                        Text(deadlineProblem).foregroundStyle(.orange).font(.caption2)
+                    }
+                }
+                .padding(.top, 4)
+            } else {
+                Text("Apple reports this device as not eligible for device management service migration.")
+                    .font(.caption2).foregroundStyle(.tertiary)
+            }
+        }
+    }
+
+    /// Update or cancel a pending migration.
+    @ViewBuilder
+    private func migrationActions(_ d: DeviceAttributes) -> some View {
+        if d.hasActiveMdmMigration && assignResult == nil {
+            VStack(alignment: .leading, spacing: 6) {
+                deadlinePicker
+                Toggle("Allow a past deadline (forces the migration now)", isOn: $allowPastDeadline)
+                    .font(.caption2)
+                HStack(spacing: 8) {
+                    Button("Update Deadline") {
+                        Task { await perform(.updateDeadline) }
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.orange)
+                    .controlSize(.small)
+                    .disabled(isAssigning || deadlineProblem != nil)
+
+                    Button("Cancel Migration") {
+                        Task { await perform(.cancelMigration) }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(isAssigning)
+
+                    if isAssigning { ProgressView().controlSize(.small) }
+                }
+                if let deadlineProblem {
+                    Text(deadlineProblem).foregroundStyle(.orange).font(.caption2)
+                }
+            }
+            .padding(.top, 4)
+        }
+    }
+
+    private var deadlinePicker: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            DatePicker(
+                "Deadline",
+                selection: $migrationDeadline,
+                in: (allowPastDeadline ? Date.distantPast : Date())...MigrationDeadline.maxDate,
+                displayedComponents: [.date, .hourAndMinute]
+            )
+            .controlSize(.small)
+            Text("Sent as \(MigrationDeadline.isoString(migrationDeadline)); at most \(mdmMigrationDeadlineMaxDays) days out.")
+                .font(.caption2).foregroundStyle(.tertiary)
+        }
+    }
+
+    private var deadlineProblem: String? {
+        MigrationDeadline.problem(with: migrationDeadline, allowPast: allowPastDeadline)
+    }
+
+    private func perform(_ mode: AssignmentMode) async {
         isAssigning = true; assignError = nil
         do {
             let client = try await appViewModel.ensureConnected()
-            let serviceId = try await client.getMdmServerIdByName(selectedServerName)
-            assignResult = try await client.createDeviceActivity(
-                activityType: type, serials: [serialNumber], serviceId: serviceId
+            let serviceId: String? = mode.needsServer
+                ? try await client.getMdmServerIdByName(selectedServerName)
+                : nil
+            assignResult = try await AssignmentViewModel.submit(
+                mode: mode,
+                serials: [serialNumber],
+                serviceId: serviceId,
+                deadline: migrationDeadline,
+                client: client
             )
         } catch {
             assignError = error.localizedDescription
