@@ -19,6 +19,10 @@ struct ASBMUtil: AsyncParsableCommand {
             Assign.self,
             Unassign.self,
             BatchStatus.self,
+            UpdateMigrationDeadline.self,
+            CancelMigration.self,
+            MigrationStatus.self,
+            ReleaseDevices.self,
             // Hidden aliases for backward compatibility
             GetDeviceInfoAlias.self,
             GetDeviceAlias.self,

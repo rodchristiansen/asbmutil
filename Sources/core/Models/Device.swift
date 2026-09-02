@@ -107,12 +107,29 @@ public struct DeviceAttributes: Codable, Sendable, Identifiable, Hashable {
     // Management
     public let deviceManagementServiceId: String?   // optional - for assigned devices
 
+    // Device management service migration (API 1.6 School / 2.3 Business). Read-only; all three
+    // are absent unless the tenant serves the migration release. `mdmMigrationStatus` and the
+    // deadline are only populated once a migration has been requested for the device.
+    public let isMdmMigrationCapable: Bool?         // Whether the device is eligible for migration
+    public let mdmMigrationStatus: String?          // REQUESTED, STARTED, SUCCESS, or FAILED
+    public let mdmMigrationDeadlineDateTime: String? // ISO 8601 deadline for the migration
+
+    // Release (API 2.4 Business). Only populated on single-device reads; absent from the list call.
+    public let releasedFromOrgDateTime: String?
+
     private enum CodingKeys: String, CodingKey {
         case serialNumber, color, deviceCapacity, deviceModel, model
         case eid, imei, meid, wifiMacAddress, bluetoothMacAddress, builtInEthernetMacAddress
         case orderDateTime, orderNumber, partNumber, purchaseSourceType, purchaseSourceId
         case productFamily, productType, status, addedToOrgDateTime, updatedDateTime
         case deviceManagementServiceId
+        case isMdmMigrationCapable, mdmMigrationStatus, mdmMigrationDeadlineDateTime
+        case releasedFromOrgDateTime
+    }
+
+    /// True while Apple reports a migration that has not yet finished (REQUESTED or STARTED).
+    public var hasActiveMdmMigration: Bool {
+        MdmMigrationStatus(rawValue: mdmMigrationStatus ?? "")?.isActive ?? false
     }
 
     /// Display-friendly model name
@@ -334,6 +351,68 @@ public struct AssignmentReconciliation: Sendable {
     }
 }
 
+// MARK: - Organization Device Activity Types
+
+/// The `activityType` values accepted by `POST /v1/orgDeviceActivities`.
+///
+/// The first two exist on every API version. The three migration types arrived with School 1.6 /
+/// Business 2.3 (changelog 2026-08-12) and `RELEASE_DEVICES` with Business 2.4 (2026-08-26). Apple
+/// serves the School Manager release on a rolling basis, so a School tenant can still reject the
+/// migration types with a 4xx even though they are documented.
+public enum DeviceActivityType: String, Codable, Sendable, CaseIterable {
+    case assignDevices = "ASSIGN_DEVICES"
+    case unassignDevices = "UNASSIGN_DEVICES"
+    /// Assign devices to a device management service and schedule a no-erase migration by a deadline.
+    case assignDevicesWithMdmMigrationDeadline = "ASSIGN_DEVICES_WITH_MDM_MIGRATION_DEADLINE"
+    /// Move the deadline of an in-progress migration. An earlier or past deadline is enforced immediately.
+    case updateMdmMigrationDeadline = "UPDATE_MDM_MIGRATION_DEADLINE"
+    /// Cancel an in-progress migration.
+    case cancelMdmMigration = "CANCEL_MDM_MIGRATION"
+    /// Release devices from the organization entirely (Apple Business only; irreversible).
+    case releaseDevices = "RELEASE_DEVICES"
+
+    /// Whether the request must carry an `mdmServer` relationship.
+    public var requiresMdmServer: Bool {
+        switch self {
+        case .assignDevices, .unassignDevices, .assignDevicesWithMdmMigrationDeadline: return true
+        case .updateMdmMigrationDeadline, .cancelMdmMigration, .releaseDevices: return false
+        }
+    }
+
+    /// Whether the request must carry `activityTypeMetadata.mdmMigrationDeadlineDateTime`.
+    public var requiresMigrationDeadline: Bool {
+        switch self {
+        case .assignDevicesWithMdmMigrationDeadline, .updateMdmMigrationDeadline: return true
+        default: return false
+        }
+    }
+
+    /// Whether the type is part of the device-management-service migration feature.
+    public var isMigrationType: Bool {
+        switch self {
+        case .assignDevicesWithMdmMigrationDeadline, .updateMdmMigrationDeadline, .cancelMdmMigration: return true
+        default: return false
+        }
+    }
+
+    /// Whether the type exists only on the Apple Business API.
+    public var isBusinessOnly: Bool { self == .releaseDevices }
+}
+
+/// `MdmMigrationStatus` — the per-device migration state Apple reports once a migration is requested.
+public enum MdmMigrationStatus: String, Codable, Sendable, CaseIterable {
+    case requested = "REQUESTED"   // Requested but the device hasn't started
+    case started = "STARTED"       // The device has started migrating
+    case success = "SUCCESS"       // The device completed the migration
+    case failed = "FAILED"         // The device failed to complete the migration
+
+    /// A migration that is still pending on the device.
+    public var isActive: Bool { self == .requested || self == .started }
+}
+
+/// Apple rejects migration deadlines more than this many days in the future.
+public let mdmMigrationDeadlineMaxDays = 90
+
 // MARK: - Activity Details
 
 public struct ActivityDetails: Codable, Sendable, Identifiable {
@@ -346,9 +425,13 @@ public struct ActivityDetails: Codable, Sendable, Identifiable {
     public let deviceSerials: [String]
     public let mdmServerName: String?
     public let mdmServerType: String?
-    public let mdmServerId: String
+    /// The target device management service. Nil for activity types that carry no server
+    /// relationship (update/cancel migration, release).
+    public let mdmServerId: String?
+    /// The migration deadline submitted with the activity, when one was.
+    public let mdmMigrationDeadlineDateTime: String?
 
-    public init(id: String, activityType: String, status: String, createdDateTime: String, updatedDateTime: String, deviceCount: Int, deviceSerials: [String], mdmServerName: String?, mdmServerType: String?, mdmServerId: String) {
+    public init(id: String, activityType: String, status: String, createdDateTime: String, updatedDateTime: String, deviceCount: Int, deviceSerials: [String], mdmServerName: String?, mdmServerType: String?, mdmServerId: String?, mdmMigrationDeadlineDateTime: String? = nil) {
         self.id = id
         self.activityType = activityType
         self.status = status
@@ -359,6 +442,87 @@ public struct ActivityDetails: Codable, Sendable, Identifiable {
         self.mdmServerName = mdmServerName
         self.mdmServerType = mdmServerType
         self.mdmServerId = mdmServerId
+        self.mdmMigrationDeadlineDateTime = mdmMigrationDeadlineDateTime
+    }
+}
+
+// MARK: - Device Management Service Migration (API 1.6 School / 2.3 Business)
+
+/// One device's migration state as read back from `GET /v1/orgDevices/{serial}`.
+public struct MdmMigrationRecord: Codable, Sendable, Identifiable {
+    public var id: String { serialNumber }
+    public let serialNumber: String
+    public let isMdmMigrationCapable: Bool?
+    public let mdmMigrationStatus: String?
+    public let mdmMigrationDeadlineDateTime: String?
+    public let status: String?                      // ASSIGNED or UNASSIGNED
+    public let deviceManagementServiceId: String?
+    /// Set when the device could not be read; the other fields are then nil.
+    public let error: String?
+
+    public init(serialNumber: String, isMdmMigrationCapable: Bool?, mdmMigrationStatus: String?, mdmMigrationDeadlineDateTime: String?, status: String?, deviceManagementServiceId: String?, error: String? = nil) {
+        self.serialNumber = serialNumber
+        self.isMdmMigrationCapable = isMdmMigrationCapable
+        self.mdmMigrationStatus = mdmMigrationStatus
+        self.mdmMigrationDeadlineDateTime = mdmMigrationDeadlineDateTime
+        self.status = status
+        self.deviceManagementServiceId = deviceManagementServiceId
+        self.error = error
+    }
+
+    public init(device d: DeviceAttributes) {
+        self.init(
+            serialNumber: d.serialNumber,
+            isMdmMigrationCapable: d.isMdmMigrationCapable,
+            mdmMigrationStatus: d.mdmMigrationStatus,
+            mdmMigrationDeadlineDateTime: d.mdmMigrationDeadlineDateTime,
+            status: d.status,
+            deviceManagementServiceId: d.deviceManagementServiceId
+        )
+    }
+
+    public var hasActiveMigration: Bool {
+        MdmMigrationStatus(rawValue: mdmMigrationStatus ?? "")?.isActive ?? false
+    }
+}
+
+/// The end state a migration confirmation expects each device to report.
+public enum MigrationExpectation: Sendable {
+    /// A migration is pending (REQUESTED or STARTED) with this deadline.
+    case scheduled(deadline: String)
+    /// No migration is pending (after a cancel).
+    case cancelled
+}
+
+/// Outcome of re-reading each device's migration state after an activity settled.
+public struct MigrationReconciliation: Sendable {
+    public let asExpected: [MdmMigrationRecord]
+    public let mismatched: [MdmMigrationRecord]
+    public let errored: [(serial: String, message: String)]
+
+    public init(asExpected: [MdmMigrationRecord], mismatched: [MdmMigrationRecord], errored: [(serial: String, message: String)]) {
+        self.asExpected = asExpected
+        self.mismatched = mismatched
+        self.errored = errored
+    }
+}
+
+// MARK: - Release (API 2.4 Business)
+
+/// Outcome of re-reading each serial after a `RELEASE_DEVICES` activity settled.
+///
+/// A released device disappears from the organization, so `released` are serials Apple now reports
+/// as not found (HTTP 404) or with `releasedFromOrgDateTime` set. `stillPresent` still read back as
+/// org devices. `errored` could not be read.
+public struct ReleaseReconciliation: Sendable {
+    public let released: [String]
+    public let stillPresent: [String]
+    public let errored: [(serial: String, message: String)]
+
+    public init(released: [String], stillPresent: [String], errored: [(serial: String, message: String)]) {
+        self.released = released
+        self.stillPresent = stillPresent
+        self.errored = errored
     }
 }
 

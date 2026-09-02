@@ -327,7 +327,18 @@ public actor APIClient {
         return DeviceVerification(found: found, notFound: notFound, errored: errored)
     }
 
-    public func createDeviceActivity(activityType: String, serials: [String], serviceId: String) async throws -> ActivityDetails {
+    /// Submit an organization device activity (`POST /v1/orgDeviceActivities`).
+    ///
+    /// `serviceId` is required for the assign/unassign types and ignored for the ones that carry no
+    /// server relationship. `mdmMigrationDeadlineDateTime` (ISO 8601) is required for the two
+    /// deadline-bearing migration types. The string-typed `activityType` overload below keeps the
+    /// original call sites working.
+    public func createDeviceActivity(
+        type: DeviceActivityType,
+        serials: [String],
+        serviceId: String? = nil,
+        mdmMigrationDeadlineDateTime: String? = nil
+    ) async throws -> ActivityDetails {
         struct ActivityResponse: Decodable {
             let data: ActivityData
             struct ActivityData: Decodable {
@@ -343,47 +354,69 @@ public actor APIClient {
             }
         }
 
+        if type.requiresMdmServer && serviceId == nil {
+            throw RuntimeError("\(type.rawValue) requires a device management service ID.")
+        }
+        if type.requiresMigrationDeadline && mdmMigrationDeadlineDateTime == nil {
+            throw RuntimeError("\(type.rawValue) requires a migration deadline (mdmMigrationDeadlineDateTime).")
+        }
+        if type.isBusinessOnly && creds.scope == "school.api" {
+            throw RuntimeError("\(type.rawValue) is an Apple Business API feature (2.4+) and is not available on Apple School Manager tenants. The credential in use (profile '\(profileName)') is a School Manager account.")
+        }
+
         let devices = serials.map { serial in
             ["type": "orgDevices", "id": serial]
+        }
+
+        var attributes: [String: Any] = ["activityType": type.rawValue]
+        if let deadline = mdmMigrationDeadlineDateTime, type.requiresMigrationDeadline {
+            attributes["activityTypeMetadata"] = ["mdmMigrationDeadlineDateTime": deadline]
+        }
+
+        var relationships: [String: Any] = ["devices": ["data": devices]]
+        if let serviceId, type.requiresMdmServer {
+            relationships["mdmServer"] = ["data": ["type": "mdmServers", "id": serviceId]]
         }
 
         let requestBody: [String: Any] = [
             "data": [
                 "type": "orgDeviceActivities",
-                "attributes": [
-                    "activityType": activityType
-                ],
-                "relationships": [
-                    "mdmServer": [
-                        "data": [
-                            "type": "mdmServers",
-                            "id": serviceId
-                        ]
-                    ],
-                    "devices": [
-                        "data": devices
-                    ]
-                ]
+                "attributes": attributes,
+                "relationships": relationships
             ]
         ]
 
         let body = try JSONSerialization.data(withJSONObject: requestBody)
-        let response: ActivityResponse = try await send(
-            Request(
-                method: .POST,
-                path: Endpoints.orgDeviceActivities.path,
-                scope: creds.scope,
-                body: body
+        let response: ActivityResponse
+        do {
+            response = try await send(
+                Request(
+                    method: .POST,
+                    path: Endpoints.orgDeviceActivities.path,
+                    scope: creds.scope,
+                    body: body
+                )
             )
-        )
+        } catch let error as RuntimeError where type.isMigrationType && creds.scope == "school.api" {
+            // Apple lists device management service migration in School Manager API 1.6 (changelog
+            // 2026-08-12) but rolls the release out per tenant; until it lands the School host
+            // rejects the new activity types. Say so instead of leaving a bare 4xx.
+            if let code = error.statusCode, [400, 404, 422].contains(code) {
+                throw RuntimeError("\(error.description). \(type.rawValue) is part of Apple School Manager API 1.6, which Apple is still rolling out; this tenant (profile '\(profileName)') may not serve it yet. The same activity works on Apple Business API 2.3+.", statusCode: code)
+            }
+            throw error
+        }
 
         // Get server details for enhanced response
-        let servers = try await listMdmServers()
-        let serverDetails = servers.first { $0.id == serviceId }
+        var serverDetails: MdmServerWithId? = nil
+        if let serviceId, type.requiresMdmServer {
+            let servers = try await listMdmServers()
+            serverDetails = servers.first { $0.id == serviceId }
+        }
 
         return ActivityDetails(
             id: response.data.id,
-            activityType: response.data.attributes.activityType ?? activityType,
+            activityType: response.data.attributes.activityType ?? type.rawValue,
             status: response.data.attributes.status ?? "PENDING",
             createdDateTime: response.data.attributes.createdDateTime ?? "",
             updatedDateTime: response.data.attributes.updatedDateTime ?? "",
@@ -391,8 +424,201 @@ public actor APIClient {
             deviceSerials: serials,
             mdmServerName: serverDetails?.serverName,
             mdmServerType: serverDetails?.serverType,
-            mdmServerId: serviceId
+            mdmServerId: type.requiresMdmServer ? serviceId : nil,
+            mdmMigrationDeadlineDateTime: type.requiresMigrationDeadline ? mdmMigrationDeadlineDateTime : nil
         )
+    }
+
+    /// String-typed overload for the original assign/unassign call sites.
+    public func createDeviceActivity(activityType: String, serials: [String], serviceId: String) async throws -> ActivityDetails {
+        guard let type = DeviceActivityType(rawValue: activityType) else {
+            throw RuntimeError("Unknown activity type '\(activityType)'. Expected one of: \(DeviceActivityType.allCases.map(\.rawValue).joined(separator: ", ")).")
+        }
+        return try await createDeviceActivity(type: type, serials: serials, serviceId: serviceId)
+    }
+
+    // MARK: - Device Management Service Migration (API 1.6 School / 2.3 Business)
+
+    /// Assign devices to a device management service and schedule a no-erase migration that must
+    /// complete by `deadline` (ISO 8601, at most 90 days out). Devices stay enrolled in their current
+    /// service until they migrate; Apple prompts users and enforces the deadline on-device.
+    public func scheduleMdmMigration(serials: [String], serviceId: String, deadline: String) async throws -> ActivityDetails {
+        try await createDeviceActivity(
+            type: .assignDevicesWithMdmMigrationDeadline,
+            serials: serials,
+            serviceId: serviceId,
+            mdmMigrationDeadlineDateTime: deadline
+        )
+    }
+
+    /// Move the deadline of an in-progress migration. Serials with no migration pending are reported
+    /// as failures in the activity log rather than rejected up front.
+    public func updateMdmMigrationDeadline(serials: [String], deadline: String) async throws -> ActivityDetails {
+        try await createDeviceActivity(
+            type: .updateMdmMigrationDeadline,
+            serials: serials,
+            mdmMigrationDeadlineDateTime: deadline
+        )
+    }
+
+    /// Cancel an in-progress migration for each serial.
+    public func cancelMdmMigration(serials: [String]) async throws -> ActivityDetails {
+        try await createDeviceActivity(type: .cancelMdmMigration, serials: serials)
+    }
+
+    /// Read each serial's migration eligibility, state and deadline from `GET /v1/orgDevices/{serial}`.
+    ///
+    /// One request per serial, fanned out with bounded concurrency; input order is preserved. A
+    /// serial that cannot be read yields a record with `error` set instead of failing the batch.
+    public func mdmMigrationStatus(serials: [String], concurrency: Int = 4) async -> [MdmMigrationRecord] {
+        let limit = max(1, min(concurrency, 32))
+        var results: [MdmMigrationRecord?] = Array(repeating: nil, count: serials.count)
+
+        await withTaskGroup(of: (Int, MdmMigrationRecord).self) { group in
+            var index = 0
+            func enqueue(_ i: Int) {
+                let serial = serials[i]
+                group.addTask { [self] in
+                    do {
+                        let device = try await self.getDeviceAttributes(serialNumber: serial)
+                        return (i, MdmMigrationRecord(device: device))
+                    } catch {
+                        return (i, MdmMigrationRecord(
+                            serialNumber: serial,
+                            isMdmMigrationCapable: nil,
+                            mdmMigrationStatus: nil,
+                            mdmMigrationDeadlineDateTime: nil,
+                            status: nil,
+                            deviceManagementServiceId: nil,
+                            error: error.localizedDescription
+                        ))
+                    }
+                }
+            }
+            while index < min(limit, serials.count) {
+                enqueue(index)
+                index += 1
+            }
+            for await (i, record) in group {
+                results[i] = record
+                if index < serials.count {
+                    enqueue(index)
+                    index += 1
+                }
+            }
+        }
+
+        return results.compactMap { $0 }
+    }
+
+    /// Re-read each device and reconcile its migration state against the intended end state.
+    ///
+    /// `.scheduled(deadline:)` expects an active migration (REQUESTED or STARTED) whose deadline
+    /// matches the one submitted; a device that already reports SUCCESS also counts. `.cancelled`
+    /// expects no active migration.
+    public func confirmMdmMigration(serials: [String], expected: MigrationExpectation, concurrency: Int = 4) async -> MigrationReconciliation {
+        let records = await mdmMigrationStatus(serials: serials, concurrency: concurrency)
+        var asExpected: [MdmMigrationRecord] = []
+        var mismatched: [MdmMigrationRecord] = []
+        var errored: [(serial: String, message: String)] = []
+
+        for record in records {
+            if let error = record.error {
+                errored.append((record.serialNumber, error))
+                continue
+            }
+            let matches: Bool
+            switch expected {
+            case .scheduled(let deadline):
+                let state = MdmMigrationStatus(rawValue: record.mdmMigrationStatus ?? "")
+                let stateOK = state?.isActive == true || state == .success
+                let deadlineOK = Self.sameInstant(record.mdmMigrationDeadlineDateTime, deadline)
+                matches = stateOK && (state == .success || deadlineOK)
+            case .cancelled:
+                matches = !record.hasActiveMigration
+            }
+            if matches { asExpected.append(record) } else { mismatched.append(record) }
+        }
+
+        return MigrationReconciliation(asExpected: asExpected, mismatched: mismatched, errored: errored)
+    }
+
+    /// Compare two ISO 8601 timestamps by instant so `17:00:00Z` and `17:00:00.000Z` agree.
+    /// Falls back to string equality when either side doesn't parse.
+    private static func sameInstant(_ a: String?, _ b: String) -> Bool {
+        guard let a else { return false }
+        if let da = parseISO8601(a), let db = parseISO8601(b) {
+            return abs(da.timeIntervalSince(db)) < 1
+        }
+        return a == b
+    }
+
+    /// Parse an ISO 8601 timestamp with or without fractional seconds.
+    public static func parseISO8601(_ s: String) -> Date? {
+        let withFraction = ISO8601DateFormatter()
+        withFraction.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = withFraction.date(from: s) { return d }
+        let plain = ISO8601DateFormatter()
+        plain.formatOptions = [.withInternetDateTime]
+        return plain.date(from: s)
+    }
+
+    // MARK: - Release Devices (API 2.4 Business)
+
+    /// Release devices from the organization. Irreversible: the devices drop out of the org, lose
+    /// their enrollment assignment, and are removed from Blueprints and the built-in service.
+    /// Apple Business only; School tenants are refused before any request is sent.
+    public func releaseDevices(serials: [String]) async throws -> ActivityDetails {
+        try await createDeviceActivity(type: .releaseDevices, serials: serials)
+    }
+
+    /// Re-read each serial after a release settled. A released device reads back as HTTP 404 or
+    /// carries `releasedFromOrgDateTime`; anything else is still present.
+    public func confirmRelease(serials: [String], concurrency: Int = 4) async -> ReleaseReconciliation {
+        let limit = max(1, min(concurrency, 32))
+        enum Probe: Sendable { case released, present, errored(String) }
+        var outcomes: [Probe?] = Array(repeating: nil, count: serials.count)
+
+        await withTaskGroup(of: (Int, Probe).self) { group in
+            var index = 0
+            func enqueue(_ i: Int) {
+                let serial = serials[i]
+                group.addTask { [self] in
+                    do {
+                        let device = try await self.getDeviceAttributes(serialNumber: serial)
+                        return (i, device.releasedFromOrgDateTime != nil ? .released : .present)
+                    } catch let error as RuntimeError where error.statusCode == 404 {
+                        return (i, .released)
+                    } catch {
+                        return (i, .errored(error.localizedDescription))
+                    }
+                }
+            }
+            while index < min(limit, serials.count) {
+                enqueue(index)
+                index += 1
+            }
+            for await (i, probe) in group {
+                outcomes[i] = probe
+                if index < serials.count {
+                    enqueue(index)
+                    index += 1
+                }
+            }
+        }
+
+        var released: [String] = []
+        var present: [String] = []
+        var errored: [(serial: String, message: String)] = []
+        for (i, serial) in serials.enumerated() {
+            switch outcomes[i] {
+            case .released: released.append(serial)
+            case .present: present.append(serial)
+            case .errored(let message): errored.append((serial, message))
+            case nil: errored.append((serial, "no result"))
+            }
+        }
+        return ReleaseReconciliation(released: released, stillPresent: present, errored: errored)
     }
 
     /// List all device activities (assignment history) from the tenant.
@@ -697,8 +923,9 @@ public actor APIClient {
 
     // MARK: - Get Device by Serial
 
-    /// Get a single device's full attributes by serial number
-    public func getDevice(serialNumber: String) async throws -> DeviceInfo {
+    /// Read a single device's attributes by serial number (`GET /v1/orgDevices/{serial}`), with no
+    /// AppleCare or assigned-server follow-up calls.
+    public func getDeviceAttributes(serialNumber: String) async throws -> DeviceAttributes {
         struct SingleDeviceResponse: Decodable {
             let data: DeviceData
         }
@@ -710,6 +937,12 @@ public actor APIClient {
                 body: nil
             )
         )
+        return response.data.attributes
+    }
+
+    /// Get a single device's full attributes by serial number
+    public func getDevice(serialNumber: String) async throws -> DeviceInfo {
+        let attributes = try await getDeviceAttributes(serialNumber: serialNumber)
 
         // Fetch AppleCare coverage (non-fatal if it fails)
         var coverages: [AppleCareAttributes]? = nil
@@ -738,7 +971,7 @@ public actor APIClient {
         }
 
         return DeviceInfo(
-            device: response.data.attributes,
+            device: attributes,
             appleCareCoverage: coverages,
             assignedMdm: mdmInfo
         )
@@ -963,7 +1196,7 @@ public actor APIClient {
         )
         FileHandle.standardError.write(data)
         FileHandle.standardError.write(Data("\n".utf8))
-        throw RuntimeError("HTTP error \(http.statusCode)")
+        throw RuntimeError("HTTP error \(http.statusCode)", statusCode: http.statusCode)
     }
 
     /// Execute a request with retry/backoff and return the final response.

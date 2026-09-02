@@ -19,6 +19,8 @@ Get devices info, assign/unassign MDM servers, and resolve device-to-server assi
 * StrictConcurrency enabled
 * Bulk device-to-server resolution via server-side device listing (4-5 API calls regardless of fleet size)
 * Bulk AppleCare enrichment for whole fleets via `list-devices --include-applecare` (two-pass fan-out, no CSV required)
+* **NEW (API 1.6 School / 2.3 Business)**: Headless device management service migration — `assign --migration-deadline` schedules a no-erase MDM migration with a deadline, `update-migration-deadline` moves it, `cancel-migration` stops it, and `migration-status` reads each device's `isMdmMigrationCapable` / `mdmMigrationStatus` / `mdmMigrationDeadlineDateTime`
+* **NEW (API 2.4, Apple Business Manager only)**: `release-devices` removes devices from the organization
 * **NEW (API 1.5)**: MAC addresses support multiple values (array format) for devices with multiple network interfaces
 * **NEW (API 1.4)**: Wi-Fi, Bluetooth, and built-in Ethernet MAC addresses for macOS
 * **NEW (API 1.3)**: AppleCare coverage lookup for devices (single-serial via `get-devices-info`, whole-fleet via `list-devices --include-applecare`)
@@ -186,6 +188,50 @@ For organizations managing multiple ABM instances, you can create named profiles
 
 # Activity Status
 ./asbmutil batch-status 361c8b76-55c6-4d07-9c1a-2ea9755c34e3
+
+# Device Management Service Migration (API 1.6 School / 2.3 Business)
+./asbmutil assign --csv-file devices.csv --mdm "Intune" --migration-deadline 2026-10-01T17:00:00Z            # Schedule a no-erase migration
+./asbmutil assign --csv-file devices.csv --mdm "Intune" --migration-deadline 2026-10-01T17:00:00Z --confirm  # ...and verify each device reports it
+./asbmutil update-migration-deadline --csv-file devices.csv --deadline 2026-09-15T17:00:00Z                 # Move the deadline
+./asbmutil update-migration-deadline --serials P8R2K47NF5X9 --deadline 2026-01-01T00:00:00Z --allow-past    # Force the migration now
+./asbmutil cancel-migration --serials P8R2K47NF5X9,Q7M5V83WH4L2
+./asbmutil migration-status --csv-file devices.csv
+
+# Release Devices (API 2.4, Apple Business Manager only; irreversible)
+./asbmutil release-devices --serials P8R2K47NF5X9 --yes
+./asbmutil release-devices --csv-file retired.csv --yes --confirm
+```
+
+### Device management service migration (API 1.6 School / 2.3 Business)
+
+Apple's 2026-08-12 release lets you change a device's device management service without erasing it, with a deadline the device enforces on its own: the user is prompted, can defer until the deadline, and is then migrated. Until now this could only be scheduled in the web UI; the same `orgDeviceActivities` endpoint now takes three more activity types, so it runs headlessly here.
+
+`assign --migration-deadline <ISO 8601 UTC>` submits `ASSIGN_DEVICES_WITH_MDM_MIGRATION_DEADLINE` instead of a plain `ASSIGN_DEVICES`. The deadline must be in the future and no more than 90 days out; the tool rejects anything else before calling Apple. Pre-flight verification and `--confirm` work the same way as a plain assign, except that confirmation re-reads each device's migration fields and expects a pending migration (`REQUESTED` or `STARTED`) with the submitted deadline.
+
+```bash
+./asbmutil assign --csv-file devices.csv --mdm "Intune" --migration-deadline 2026-10-01T17:00:00Z --confirm
+```
+
+`update-migration-deadline` takes the same serial inputs and a `--deadline`. An earlier deadline is honored immediately; a past one forces the migration now with no option to delay, which is why it needs `--allow-past`. `cancel-migration` stops an in-progress migration. For both, a serial with no migration pending is reported as a failure in Apple's activity log rather than rejected up front, so use `--confirm` (or `batch-status`) when it matters.
+
+```bash
+./asbmutil cancel-migration --csv-file devices.csv --confirm
+```
+
+`migration-status` reads `GET /v1/orgDevices/{serial}` for each serial and prints `isMdmMigrationCapable`, `mdmMigrationStatus` (`REQUESTED`, `STARTED`, `SUCCESS`, `FAILED`), `mdmMigrationDeadlineDateTime`, plus the assignment status and service ID. The same three fields also appear on every device in `list-devices` and `get-devices-info`, and in the app's device detail and exports.
+
+```bash
+./asbmutil migration-status --csv-file devices.csv
+```
+
+> **Rollout note.** Apple's changelog lists this under Apple School Manager API 1.6 and Apple Business API 2.3, both dated 2026-08-12. Live-verified on 2026-09-02 against a School Manager tenant: the three device fields are served and `CANCEL_MDM_MIGRATION` was accepted and completed, even though parts of Apple's School documentation still carry the 1.5 banner. If a tenant has not received the release yet, the new activity types come back as a 4xx; the tool explains that instead of leaving a bare HTTP error, and `migration-status` reports when no device returned any migration field.
+
+### Release devices (API 2.4, Apple Business Manager only)
+
+`release-devices` submits `RELEASE_DEVICES`, which removes devices from the organization permanently: enrollment assignments are removed, devices are unenrolled from the built-in device management service and dropped from Blueprints. It requires `--yes`, runs the same pre-flight serial verification as `assign`, and with `--confirm` re-reads each serial afterwards, treating an HTTP 404 or a set `releasedFromOrgDateTime` as released. The Apple School Manager API does not offer this activity, so the command refuses to run against a School Manager credential.
+
+```bash
+./asbmutil release-devices --csv-file retired.csv --yes --confirm
 ```
 
 ## Profile System

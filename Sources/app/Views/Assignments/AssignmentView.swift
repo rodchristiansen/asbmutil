@@ -232,7 +232,7 @@ struct AssignmentView: View {
                             Text(activity.deviceSerials.count == 1
                                  ? activity.deviceSerials[0] : "Multiple")
                                 .font(.callout).fontWeight(.medium)
-                            Text("\(activity.deviceCount) Device\(activity.deviceCount == 1 ? "" : "s") \u{00B7} \(activity.mdmServerName ?? activity.mdmServerId)")
+                            Text("\(activity.deviceCount) Device\(activity.deviceCount == 1 ? "" : "s") \u{00B7} \(activity.mdmServerName ?? activity.mdmServerId ?? "-")")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()

@@ -115,6 +115,9 @@ struct DeviceDetailView: View {
                 section("Purchase", rows: purchaseRows(info.device))
                 section("Network", rows: networkRows(info.device))
                 section("Timestamps", rows: timestampRows(info.device))
+                if let rows = migrationRows(info.device) {
+                    section("Migration", rows: rows)
+                }
 
                 if let coverages = info.appleCareCoverage, !coverages.isEmpty {
                     ForEach(Array(coverages.enumerated()), id: \.offset) { i, c in
@@ -282,6 +285,17 @@ struct DeviceDetailView: View {
 
     private func timestampRows(_ d: DeviceAttributes) -> [(String, String)] {
         [("Added", d.addedToOrgDateTime ?? "-"), ("Updated", d.updatedDateTime ?? "-")]
+    }
+
+    /// Device management service migration state (API 1.6 School / 2.3 Business). Nil when the
+    /// tenant doesn't serve the migration fields, so the section stays hidden.
+    private func migrationRows(_ d: DeviceAttributes) -> [(String, String)]? {
+        guard d.isMdmMigrationCapable != nil || d.mdmMigrationStatus != nil else { return nil }
+        var r: [(String, String)] = []
+        if let capable = d.isMdmMigrationCapable { r.append(("Eligible", capable ? "Yes" : "No")) }
+        r.append(("Status", d.mdmMigrationStatus ?? "No migration pending"))
+        if let deadline = d.mdmMigrationDeadlineDateTime { r.append(("Deadline", deadline)) }
+        return r
     }
 
     private func appleCareRows(_ c: AppleCareAttributes) -> [(String, String)] {
