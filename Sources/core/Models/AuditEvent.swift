@@ -73,6 +73,30 @@ public struct AuditEventRecord: Codable, Sendable, Identifiable {
     public let serialNumber: String?
     public let targetServerName: String?
 
+    /// Memberwise initializer, for callers building records from cached or exported data rather
+    /// than from the wire (the `init(from:)` below otherwise suppresses the synthesized one).
+    public init(
+        id: String,
+        eventDateTime: String?,
+        type: String,
+        outcome: String?,
+        actorName: String?,
+        subjectId: String?,
+        subjectName: String?,
+        serialNumber: String?,
+        targetServerName: String?
+    ) {
+        self.id = id
+        self.eventDateTime = eventDateTime
+        self.type = type
+        self.outcome = outcome
+        self.actorName = actorName
+        self.subjectId = subjectId
+        self.subjectName = subjectName
+        self.serialNumber = serialNumber
+        self.targetServerName = targetServerName
+    }
+
     public init(from data: AuditEventData) {
         let a = data.attributes
         let deviceData = a.eventDataDeviceAssignedToServer ?? a.eventDataDeviceUnassignedFromServer
