@@ -875,6 +875,47 @@ public actor APIClient {
         )
     }
 
+    // MARK: - Activation Lock Status
+
+    /// Read a device's Activation Lock state and kind
+    /// (`GET /v1/orgDevices/{serial}/activationLockStatus`).
+    ///
+    /// Returns nil when Apple will not report the state: the read fails with a server
+    /// error for a device carrying an internal-only lock state. That is "unknown", never
+    /// "unlocked", so callers must not read nil as disabled. Other failures throw.
+    public func getActivationLockStatus(serialNumber: String) async throws -> ActivationLockStatus? {
+        struct Response: Decodable {
+            struct DataItem: Decodable {
+                struct Attributes: Decodable {
+                    let isLocked: Bool?
+                    let lockType: String?
+                }
+                let attributes: Attributes
+            }
+            let data: DataItem
+        }
+        do {
+            let response: Response = try await send(
+                Request(
+                    method: .GET,
+                    path: Endpoints.activationLockStatus(serialNumber).path,
+                    scope: creds.scope,
+                    body: nil
+                )
+            )
+            return ActivationLockStatus(
+                deviceSerialNumber: serialNumber,
+                isLocked: response.data.attributes.isLocked ?? false,
+                lockType: response.data.attributes.lockType
+            )
+        } catch let error as RuntimeError {
+            if let status = error.statusCode, (500...599).contains(status) {
+                return nil
+            }
+            throw error
+        }
+    }
+
     /// Fan out per-device AppleCare coverage lookups with bounded concurrency.
     ///
     /// Apple's API has no bulk AppleCare endpoint — `/v1/orgDevices/{serial}/appleCareCoverage`
