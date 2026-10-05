@@ -862,6 +862,71 @@ struct MigrationStatus: AsyncParsableCommand {
     }
 }
 
+// MARK: - Activation Lock Status
+
+struct ActivationLock: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "activation-lock",
+        abstract: "Show each device's Activation Lock state and whether it is an MDM or a user lock"
+    )
+
+    @Option(name: .customLong("serials"), help: "Comma-separated list of device serial numbers")
+    var serials: String?
+
+    @Option(name: .customLong("csv-file"), help: "Path to CSV file containing serial numbers (first column)")
+    var csvFile: String?
+
+    @Option(name: .customLong("profile"), help: "Profile name to use for credentials")
+    var profileName: String?
+
+    func validate() throws {
+        guard (serials != nil) != (csvFile != nil) else {
+            throw ValidationError("Must specify either --serials or --csv-file, but not both")
+        }
+    }
+
+    struct Record: Encodable {
+        let deviceSerialNumber: String
+        let state: String
+        let isLocked: Bool?
+        let lockType: String?
+        let error: String?
+    }
+
+    func run() async throws {
+        let client = try await APIClient(credentials: Creds.load(profileName: profileName), profileName: profileName)
+        let serialNumbers = try parseSerials(serials: serials, csvFile: csvFile)
+
+        // Apple serves this one device per call; sequential keeps well inside the quota.
+        var records: [Record] = []
+        for serial in serialNumbers {
+            do {
+                if let status = try await client.getActivationLockStatus(serialNumber: serial) {
+                    records.append(Record(
+                        deviceSerialNumber: serial,
+                        state: status.isLocked ? "enabled" : "disabled",
+                        isLocked: status.isLocked,
+                        lockType: status.lockType,
+                        error: nil
+                    ))
+                } else {
+                    records.append(Record(deviceSerialNumber: serial, state: "unknown", isLocked: nil, lockType: nil, error: nil))
+                }
+            } catch {
+                records.append(Record(deviceSerialNumber: serial, state: "unknown", isLocked: nil, lockType: nil, error: "\(error)"))
+            }
+        }
+
+        let locked = records.filter { $0.isLocked == true }.count
+        let unknown = records.filter { $0.isLocked == nil }.count
+        FileHandle.standardError.write(Data("\(records.count) device(s): \(locked) locked, \(unknown) unknown.\n".utf8))
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .prettyPrinted
+        print(String(decoding: try encoder.encode(records), as: UTF8.self))
+    }
+}
+
 // MARK: - Release Devices (API 2.4 Business)
 
 struct ReleaseDevices: AsyncParsableCommand {

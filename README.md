@@ -19,6 +19,7 @@ Get devices info, assign/unassign MDM servers, and resolve device-to-server assi
 * StrictConcurrency enabled
 * Bulk device-to-server resolution via server-side device listing (4-5 API calls regardless of fleet size)
 * Bulk AppleCare enrichment for whole fleets via `list-devices --include-applecare` (two-pass fan-out, no CSV required)
+* **NEW**: Activation Lock state via `activation-lock` — whether each device is locked, and whether it is an MDM lock (bypass code escrowed) or a user lock (needs the owner)
 * **NEW (API 1.6 School / 2.3 Business)**: Headless device management service migration — `assign --migration-deadline` schedules a no-erase MDM migration with a deadline, `update-migration-deadline` moves it, `cancel-migration` stops it, and `migration-status` reads each device's `isMdmMigrationCapable` / `mdmMigrationStatus` / `mdmMigrationDeadlineDateTime`
 * **NEW (API 2.4, Apple Business Manager only)**: `release-devices` removes devices from the organization
 * **NEW (API 2.0, Apple Business Manager only)**: Organization audit events via `audit-events` — query device/server moves and other org changes by time range and type (e.g. migration verification via `DEVICE_ASSIGNED_TO_SERVER`)
@@ -228,6 +229,14 @@ The app has the same operations. The Assignments section and the multi-select in
 ```
 
 > **Rollout note.** Apple's changelog lists this under Apple School Manager API 1.6 and Apple Business API 2.3, both dated 2026-08-12. Live-verified on 2026-09-02 against a School Manager tenant: the three device fields are served and `CANCEL_MDM_MIGRATION` was accepted and completed, even though parts of Apple's School documentation still carry the 1.5 banner. If a tenant has not received the release yet, the new activity types come back as a 4xx; the tool explains that instead of leaving a bare HTTP error, and `migration-status` reports when no device returned any migration field.
+
+### Activation Lock
+
+`activation-lock` reads `/v1/orgDevices/{serial}/activationLockStatus` for each serial and reports `enabled`, `disabled` or `unknown`, with `lockType` naming the kind of lock: `MDM`, for which a bypass code is escrowed so clearing it does not need the owner, or `USER`, which does. Apple serves this one device per request and fails the read with a server error for a device reporting an internal-only lock state; that is reported as `unknown`, never as `disabled`. The command only reports state — it never reads a bypass code, and neither Apple service exposes a way to clear a lock.
+
+```bash
+./asbmutil activation-lock --serials SERIAL1,SERIAL2
+```
 
 ### Release devices (API 2.4, Apple Business Manager only)
 

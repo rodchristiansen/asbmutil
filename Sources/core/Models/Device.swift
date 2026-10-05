@@ -260,6 +260,25 @@ public struct AppleCareCoverage: Codable, Sendable {
     public let coverages: [AppleCareAttributes]
 }
 
+// MARK: - Activation Lock Status
+
+/// A device's Activation Lock state as the organization reports it.
+///
+/// `lockType` is `MDM` (a bypass code is escrowed, so clearing the lock does not need the
+/// owner), `USER` (clearing it needs the owner's Apple Account) or `NONE`. It is only
+/// meaningful while `isLocked` is true.
+public struct ActivationLockStatus: Codable, Sendable {
+    public let deviceSerialNumber: String
+    public let isLocked: Bool
+    public let lockType: String?
+
+    public init(deviceSerialNumber: String, isLocked: Bool, lockType: String?) {
+        self.deviceSerialNumber = deviceSerialNumber
+        self.isLocked = isLocked
+        self.lockType = lockType
+    }
+}
+
 // MARK: - Assigned Server Response
 
 public struct AssignedServerResponse: Codable, Sendable {
