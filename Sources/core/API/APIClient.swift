@@ -13,23 +13,32 @@ public actor APIClient {
     private let creds: Credentials
     private let profileName: String
     private let session: URLSession
+    /// False keeps the access token in memory only, never touching the stored
+    /// credential backend (the Keychain on macOS).
+    private let cachesToken: Bool
 
     // Retry configuration
     private let maxRetries = 3
     private let baseDelaySeconds: Double = 1.0
     private let maxDelaySeconds: Double = 60.0
 
-    public init(credentials: Credentials, profileName: String? = nil) async throws {
+    /// - Parameter cachesToken: When true (the default), the access token is
+    ///   read from and saved to the stored credential backend so later runs
+    ///   reuse it. Pass false for a caller that supplies its own credentials
+    ///   and must not read or write that store; the token then lives only as
+    ///   long as this client.
+    public init(credentials: Credentials, profileName: String? = nil, cachesToken: Bool = true) async throws {
         creds = credentials
-        self.profileName = profileName ?? Keychain.getCurrentProfile()
+        self.cachesToken = cachesToken
+        self.profileName = profileName ?? (cachesToken ? Keychain.getCurrentProfile() : "default")
         self.session = Self.makeSession(for: credentials.scope)
 
         // Try to load a cached token first
-        if let cached = Keychain.loadToken(profileName: self.profileName), !cached.isExpired {
+        if cachesToken, let cached = Keychain.loadToken(profileName: self.profileName), !cached.isExpired {
             token = cached
         } else {
             token = try await Self.fetchToken(creds, session: session)
-            Keychain.saveToken(token, profileName: self.profileName)
+            if cachesToken { Keychain.saveToken(token, profileName: self.profileName) }
         }
     }
 
@@ -1185,7 +1194,7 @@ public actor APIClient {
     private func ensureValidToken() async throws {
         if token.isExpired {
             token = try await Self.fetchToken(creds, session: session)
-            Keychain.saveToken(token, profileName: profileName)
+            if cachesToken { Keychain.saveToken(token, profileName: profileName) }
         }
     }
 
