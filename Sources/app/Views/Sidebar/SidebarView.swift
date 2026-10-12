@@ -19,6 +19,8 @@ struct SidebarView: View {
                     .tag(NavigationSection.devices)
                 Label("Servers", systemImage: NavigationSection.mdmServers.icon)
                     .tag(NavigationSection.mdmServers)
+                Label("Audit Events", systemImage: NavigationSection.auditEvents.icon)
+                    .tag(NavigationSection.auditEvents)
             }
 
             Section("Actions") {
