@@ -126,7 +126,10 @@ final class AuditEventsViewModel {
 
     static func csv(_ events: [AuditEventRecord], separator: String = ",") -> String {
         func field(_ s: String?) -> String {
-            let v = s ?? ""
+            var v = s ?? ""
+            // Names and payload values come from the tenant; keep a spreadsheet from reading
+            // one that starts with =, +, - or @ as a formula.
+            if let first = v.first, "=+-@\t\r".contains(first) { v = "'" + v }
             if separator == "\t" { return v.replacingOccurrences(of: "\t", with: " ").replacingOccurrences(of: "\n", with: " ") }
             return v.contains(where: { $0 == "," || $0 == "\"" || $0.isNewline })
                 ? "\"" + v.replacingOccurrences(of: "\"", with: "\"\"") + "\"" : v
