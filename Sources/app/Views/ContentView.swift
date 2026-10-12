@@ -5,6 +5,7 @@ enum NavigationSection: String, Hashable, CaseIterable {
     case dashboard = "Dashboard"
     case devices = "Devices"
     case mdmServers = "Servers"
+    case auditEvents = "Audit Events"
     case assignments = "Assignments"
     case deviceLookup = "Device Lookup"
     case batchStatus = "Batch Status"
@@ -14,6 +15,7 @@ enum NavigationSection: String, Hashable, CaseIterable {
         case .dashboard: return "chart.bar.xaxis"
         case .devices: return "desktopcomputer"
         case .mdmServers: return "server.rack"
+        case .auditEvents: return "list.bullet.clipboard"
         case .assignments: return "arrow.left.arrow.right"
         case .deviceLookup: return "magnifyingglass"
         case .batchStatus: return "clock.arrow.circlepath"
@@ -39,6 +41,8 @@ struct ContentView: View {
                 DeviceListView()
             case .mdmServers:
                 MDMServerListView()
+            case .auditEvents:
+                AuditEventsView()
             case .assignments:
                 AssignmentView()
             case .deviceLookup:

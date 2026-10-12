@@ -1,0 +1,50 @@
+name: Apple API watch
+
+on:
+  schedule:
+    - cron: '17 15 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v6
+
+    - name: Compare Apple's docs to docs/apple-api/coverage.json
+      id: check
+      run: |
+        set +e
+        python3 scripts/apple-api-watch.py check > report.txt
+        status=$?
+        cat report.txt
+        if [ "$status" -eq 3 ]; then echo "drift=1" >> "$GITHUB_OUTPUT"; exit 0; fi
+        exit "$status"
+
+    - name: Open or update the tracking issue
+      if: steps.check.outputs.drift == '1'
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        {
+          echo "Apple published API changes that \`docs/apple-api/coverage.json\` does not record yet."
+          echo
+          echo '```'
+          cat report.txt
+          echo '```'
+          echo
+          echo "Run \`scripts/apple-api-watch.py update\`, set a status on each new endpoint, and implement what we need."
+          echo "Changelog: https://developer.apple.com/documentation/apple-school-and-business-manager-api/apple-school-manager-and-apple-business-api-changelog"
+        } > body.md
+        gh label create apple-api --color 0E8A16 --description "Apple School/Business API release tracking" --force
+        existing=$(gh issue list --label apple-api --state open --json number --jq '.[0].number')
+        if [ -n "$existing" ]; then
+          gh issue comment "$existing" --body-file body.md
+        else
+          gh issue create --title "Apple API changes to review" --label apple-api --body-file body.md
+        fi
