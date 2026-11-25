@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "asbmutil",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS("27.0")],
     products: [
         .executable(name: "asbmutil", targets: ["ASBMUtilCLI"]),
         .executable(name: "ASBMUtilApp", targets: ["ASBMUtilApp"]),

@@ -128,7 +128,7 @@ compile-icon:
 		xcrun actool \
 			--compile $(ACTOOL_OUT) \
 			--platform macosx \
-			--minimum-deployment-target 14.0 \
+			--minimum-deployment-target 27.0 \
 			--app-icon $(ICON_NAME) \
 			--output-partial-info-plist $(ACTOOL_OUT)/partial-info.plist \
 			--warnings --errors \
@@ -178,7 +178,7 @@ create-app-bundle: swift-build compile-icon
 	@/usr/libexec/PlistBuddy -c "Add :CFBundlePackageType string APPL" $(APP_CONTENTS)/Info.plist
 	@/usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string $(MARKETING_VERSION)" $(APP_CONTENTS)/Info.plist
 	@/usr/libexec/PlistBuddy -c "Add :CFBundleVersion string $(BUILD_NUMBER)" $(APP_CONTENTS)/Info.plist
-	@/usr/libexec/PlistBuddy -c "Add :LSMinimumSystemVersion string 14.0" $(APP_CONTENTS)/Info.plist
+	@/usr/libexec/PlistBuddy -c "Add :LSMinimumSystemVersion string 27.0" $(APP_CONTENTS)/Info.plist
 	@/usr/libexec/PlistBuddy -c "Add :NSHighResolutionCapable bool true" $(APP_CONTENTS)/Info.plist
 	@# Copy icon assets if compiled
 	@if [ -f "$(ACTOOL_OUT)/Assets.car" ]; then \
