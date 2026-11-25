@@ -8,14 +8,14 @@ on:
 
 jobs:
   build-macos:
-    runs-on: macos-26
+    runs-on: xcode-27
     steps:
     - name: Checkout code
       uses: actions/checkout@v6
 
-    - name: Select Xcode 26 (Icon Composer support)
+    - name: Select Xcode 27 (Icon Composer support)
       run: |
-        sudo xcode-select -s /Applications/Xcode_26.4.app
+        sudo xcode-select -s /Applications/Xcode_27.2.app
         swift --version
         xcodebuild -version
 

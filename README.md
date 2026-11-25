@@ -765,7 +765,7 @@ scripts/apple-api-watch.py check
 
 ## Requirements
 
-* macOS 14 or newer  
+* macOS 27 or newer  
 * Xcode 16 or newer (Swift 6 toolchain)  
 * AxM API Account
 
